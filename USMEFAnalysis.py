@@ -140,7 +140,7 @@ class USMEFAnalysis:
     # plt.xlabel('Time (s)')
     # plt.ylabel('Intensity (a.u.)')
     # sns.despine() # Final cleanup    
-    def load_and_clean_data(self, start_date='2019-01-01', end_date='2022-12-31'):
+    def load_and_clean_data(self, start_date='2019-01-01', end_date='2025-09-30'):
         """Load and clean full EIA hourly dataset (Region_US48.xlsx)"""
 
         # --- Load Excel data ---
@@ -172,7 +172,7 @@ class USMEFAnalysis:
         df['hourly_emissions_mlb'] = df['hourly_emissions'] * 2204.6 / 1_000_000  # metric tons → million lbs
         df['hourly_generation_mkwh'] = df['hourly_generation'] * 1000 / 1_000_000  # GWh → million kWh
 
-        # --- Select final columns (like in R) ---
+        # --- Select final columns  ---
         keep_cols = [
             'bid_offer_date', 'interval', 'date_hour', 
             'D', 'NG',
@@ -208,7 +208,7 @@ class USMEFAnalysis:
         for i in range(1, 13):
             df[f'm{i}'] = (df['month'] == i).astype(int)
         
-        # Season (meteorological)
+        # Season (astronomical) 
         season_map = {1: 'Winter', 2: 'Winter', 3: 'Spring', 4: 'Spring',
                      5: 'Spring', 6: 'Summer', 7: 'Summer', 8: 'Summer',
                      9: 'Autumn', 10: 'Autumn', 11: 'Autumn', 12: 'Winter'}
@@ -565,83 +565,93 @@ class USMEFAnalysis:
 
         print("\n✅ Publication-ready seasonal diagnostic plots generated successfully.")
             
-    def plot_lag_nonlinearity(self, variable='hourly_emissions_res', lag=1, year=None, frac=0.2, save_path=None):
-        """
-        Plot x_t vs x_{t-lag} with a LOESS smoothing line to detect nonlinearity.
-        Based on Tsay (2019), Figures 2.4, 2.6, and 2.9.
-        """
-        from statsmodels.nonparametric.smoothers_lowess import lowess
+    def plot_lag_nonlinearity(
+            self, variable="hourly_emissions_res", lag=1, year=None,
+            frac=0.2, save_path=None
+        ):
+            """
+            Plot x_t vs x_{t-lag} with LOESS smoothing to visualize nonlinearity.
+            Optimized for one-column journal figures (Tsay, 2019 style).
+            """
+            import matplotlib.pyplot as plt
+            import numpy as np
+            from statsmodels.nonparametric.smoothers_lowess import lowess
 
-        if self.data is None:
-            raise ValueError("No data loaded. Run load_and_clean_data() first.")
-        if variable not in self.data.columns:
-            raise ValueError(f"Column '{variable}' not found. Did you run seasonal_adjustment()?")
+            if self.data is None:
+                raise ValueError("No data loaded. Run load_and_clean_data() first.")
+            if variable not in self.data.columns:
+                raise ValueError(f"Column '{variable}' not found. Did you run seasonal_adjustment()?")
 
-        # --- Data prep ---
-        df_plot = self.data.copy()
-        if year:
-            df_plot = df_plot[df_plot['year'] == year]
-            time_label = str(year)
-        else:
-            time_label = "Full Sample"
+            # --- Data selection ---
+            df_plot = self.data.copy()
+            if year:
+                df_plot = df_plot[df_plot["year"] == year]
+                time_label = str(year)
+            else:
+                time_label = "Full Sample"
 
-        y_t = df_plot[variable]
-        x_t_lag = df_plot[variable].shift(lag)
-        mask = ~np.isnan(x_t_lag) & ~np.isnan(y_t)
-        x_vals, y_vals = x_t_lag[mask], y_t[mask]
+            y_t = df_plot[variable]
+            x_t_lag = df_plot[variable].shift(lag)
+            mask = ~np.isnan(x_t_lag) & ~np.isnan(y_t)
+            x_vals, y_vals = x_t_lag[mask], y_t[mask]
 
-        print(f"⏳ Calculating LOESS smoothing (n={len(x_vals)}, lag={lag})...")
-        z = lowess(y_vals, x_vals, frac=frac, it=0)
+            print(f"⏳ Calculating LOESS smoothing (n={len(x_vals)}, lag={lag})...")
+            z = lowess(y_vals, x_vals, frac=frac, it=0)
 
-        # --- Plotting ---
-        self.set_publication_style()
-        width_inches, _ = self.get_figsize(120)
-        fig, ax = plt.subplots(figsize=(width_inches, width_inches))
+            # --- Figure settings for one-column layout ---
+            plt.style.use("seaborn-v0_8-white")
+            fig, ax = plt.subplots(figsize=self.get_figsize(89*2)) # ~89 mm × 66 mm
 
-        # Scatter
-        ax.scatter(x_vals, y_vals,
-                alpha=0.15, s=3, color='#2c3e50',
-                label='Observations', edgecolor='none')
+            # --- Scatter plot ---
+            ax.scatter(
+                x_vals, y_vals, alpha=0.15, s=3.5,
+                color="#2c3e50", label="Observations", edgecolor="none"
+            )
 
-        # LOESS line
-        ax.plot(z[:, 0], z[:, 1],
-                color='#e74c3c', linewidth=1.5,
-                label=f'LOESS Fit (frac={frac})')
+            # --- LOESS line ---
+            ax.plot(
+                z[:, 0], z[:, 1],
+                color="#e74c3c", linewidth=0.9,
+                label=f"LOESS (frac={frac})"
+            )
 
-        # Styling
-        ax.set_title(f"Nonlinearity Check: {variable}\n{time_label} | Lag $d={lag}$",
-                    loc='left', fontweight='bold')
-        ax.set_xlabel(f"$x_{{t-{lag}}}$ (Lagged)")
-        ax.set_ylabel(f"$x_t$ (Current)")
+            # --- Styling ---
+            ax.set_title(
+                f"Nonlinearity Check ({time_label})", loc="left", fontsize=8, fontweight="bold"
+            )
+            ax.set_xlabel(f"$x_{{t-{lag}}}$", fontsize=7)
+            ax.set_ylabel(f"$x_t$", fontsize=7)
 
-        # Reference lines
-        ax.axhline(0, color='black', linewidth=0.5, linestyle='--', alpha=0.5)
-        ax.axvline(0, color='black', linewidth=0.5, linestyle='--', alpha=0.5)
+            # Reference lines
+            ax.axhline(0, color="black", linewidth=0.4, linestyle="--", alpha=0.5)
+            ax.axvline(0, color="black", linewidth=0.4, linestyle="--", alpha=0.5)
 
-        # ✅ Fit axes tightly to data
-        x_margin = 0.05 * (x_vals.max() - x_vals.min())
-        y_margin = 0.05 * (y_vals.max() - y_vals.min())
-        ax.set_xlim(x_vals.min() - x_margin, x_vals.max() + x_margin)
-        ax.set_ylim(y_vals.min() - y_margin, y_vals.max() + y_margin)
+            # Axis limits with small margins
+            x_margin = 0.05 * (x_vals.max() - x_vals.min())
+            y_margin = 0.05 * (y_vals.max() - y_vals.min())
+            ax.set_xlim(x_vals.min() - x_margin, x_vals.max() + x_margin)
+            ax.set_ylim(y_vals.min() - y_margin, y_vals.max() + y_margin)
 
-        ax.legend(frameon=True, fontsize=7)
-        plt.tight_layout()
+            # Compact ticks and font sizes
+            ax.tick_params(axis="both", labelsize=6, width=0.3, pad=2)
+            ax.legend(frameon=False, fontsize=6, loc="best", handlelength=1.5)
 
-        # ✅ Avoid duplicate rendering
-        if save_path:
-            fname = f"{save_path}/Tsay_LagPlot_{variable}_Lag{lag}_{time_label}.png"
-            fig.savefig(fname, dpi=300, bbox_inches='tight')
-            print(f"💾 Saved plot to {fname}")
-            plt.close(fig)
-        else:
-            plt.show()
+            plt.tight_layout(pad=0.5)
 
+            # --- Save or show ---
+            if save_path:
+                filename = f"{save_path}/Lag{lag}_{variable}_{year}.pdf"
+                plt.savefig(filename, bbox_inches="tight", dpi=600)
+                print(f"💾 Figure saved to: {filename}")
+            else:
+                plt.show()
 
+            
     def run_annual_nonlinearity_tests_r(self, y_res_col="hourly_emissions_res", save_path=None):
         """
         Perform annual stationarity and nonlinearity tests using R packages
-        (urca, NTS, fNonlinear) via rpy2. 
-        This reproduces the R workflow exactly.
+        (urca, NTS, fNonlinear) via rpy2.
+        Reproduces the R workflow shown in Tsay (2019) and your R script.
         """
 
         import pandas as pd
@@ -650,13 +660,12 @@ class USMEFAnalysis:
         import re
         from scipy.stats import f as f_dist
 
-        warnings.filterwarnings("ignore")
-
-        # rpy2 imports
         from rpy2.robjects import r, globalenv, FloatVector
         from rpy2.robjects.packages import importr
 
-        # Import required R packages
+        warnings.filterwarnings("ignore")
+
+        # --- Import R packages ---
         urca = importr("urca")
         NTS = importr("NTS")
         fNonlinear = importr("fNonlinear")
@@ -673,100 +682,103 @@ class USMEFAnalysis:
 
         results_all = []
 
-        # --- Loop through years ---
         for year in years:
             print(f"📅 Processing {year}...")
             y = df.loc[df["year"] == year, y_res_col].dropna().to_numpy()
 
-            # Skip if too few observations
             if len(y) < 30:
                 print(f"⚠️  Skipping {year}: too few data points ({len(y)})")
+                continue
+
+            if np.allclose(np.std(y), 0):
+                print(f"⚠️  Skipping {year}: near-constant series")
                 continue
 
             # Send Python vector to R
             globalenv["y"] = FloatVector(y)
 
-            # 1️⃣ ADF test
+            # === 1️⃣ ADF Test ===
             adf = urca.ur_df(FloatVector(y), type="none", selectlags="BIC")
-            adf_stat = float(adf.do_slot("teststat")[0])
-            adf_cval = float(adf.do_slot("cval")[1])
+            ADF_stat = float(adf.do_slot("teststat")[0])
+            ADF_cval = float(adf.do_slot("cval")[1])
 
-            # 2️⃣ DF-GLS test
+            # === 2️⃣ DF-GLS Test ===
             lag_max = int(adf.do_slot("lags")[0])
             dfgls = urca.ur_ers(FloatVector(y), lag_max=lag_max, model="constant")
-            dfgls_stat = float(dfgls.do_slot("teststat")[0])
-            dfgls_cval = float(dfgls.do_slot("cval")[1])
+            DFGLS_stat = float(dfgls.do_slot("teststat")[0])
+            DFGLS_cval = float(dfgls.do_slot("cval")[1])
 
-            # 3️⃣ PP test
+            # === 3️⃣ PP Test ===
             pp = urca.ur_pp(FloatVector(y), type="Z-tau", model="constant", lags="long")
-            pp_stat = float(pp.do_slot("teststat")[0])
-            pp_cval = float(pp.do_slot("cval")[1])
+            PP_stat = float(pp.do_slot("teststat")[0])
+            PP_cval = float(pp.do_slot("cval")[1])
 
-            # 4️⃣ KPSS test
-            kpss = urca.ur_kpss(FloatVector(y), type="mu", lags="long")
-            kpss_stat = float(kpss.do_slot("teststat")[0])
-            kpss_cval = float(kpss.do_slot("cval")[1])
+            # === 4️⃣ KPSS Test ===
+            kpss = urca.ur_kpss(FloatVector(y), type="mu", lags="short")
+            KPSS_stat = float(kpss.do_slot("teststat")[0])
+            KPSS_cval = float(kpss.do_slot("cval")[1])
 
-            # 5️⃣ Tsay F-test (linearity vs nonlinearity)
+            # === 5️⃣ Tsay F-test (NTS) ===
             try:
                 f_test = NTS.F_test(FloatVector(y), int(pp.do_slot("lag")[0]), thres=float(np.mean(y)))
                 F_stat = float(f_test.rx2("test.stat")[0])
                 F_pvalue = float(f_test.rx2("p.value")[0])
-            except Exception:
+            except Exception as e:
+                print(f"⚠️  Tsay F-test failed ({year}): {e}")
                 F_stat, F_pvalue = np.nan, np.nan
 
-            # 6️⃣ Threshold Nonlinearity Test (TNT)
+            # === 6️⃣ Threshold Nonlinearity Test (TNT) ===
             try:
                 yN = int(0.1 * len(y))
                 tnt = NTS.thr_test(FloatVector(y), p=int(pp.do_slot("lag")[0]), d=1, ini=yN, include_mean=False)
                 TNT_stat = float(tnt[0][0])
                 DF1, DF2 = float(tnt[1][0]), float(tnt[1][1])
                 TNT_pvalue = 1 - f_dist.cdf(TNT_stat, DF1, DF2)
-            except Exception:
+            except Exception as e:
+                print(f"⚠️  TNT test failed ({year}): {e}")
                 TNT_stat, TNT_pvalue = np.nan, np.nan
 
-            # 7️⃣ BDS Test (from fNonlinear)
+            # === 7️⃣ BDS Test (fNonlinear) ===
             try:
                 bds_test = fNonlinear.bdsTest(FloatVector(y), m=6, eps=2 * np.std(y))
-
-                # Extract the R data.frame inside "test"
-                bds_table = bds_test.do_slot("test")
-
-                # Try to get the first valid row (m=6, eps[1])
-                # Columns typically are: ['statistic', 'p.value', 'eps', 'm']
-                bds_stat = float(bds_table.rx2("statistic")[0])
-                bds_pvalue = float(bds_table.rx2("p.value")[0])
+                bds_tab = bds_test.do_slot("test")
+                bds_stat = float(bds_tab.rx2("statistic")[0])
+                bds_pvalue = float(bds_tab.rx2("p.value")[0])
             except Exception as e:
-                print(f"⚠️  BDS test failed: {e}")
+                print(f"⚠️  BDS test failed ({year}): {e}")
                 bds_stat, bds_pvalue = np.nan, np.nan
-            # 8️⃣ PR Test (Peña–Rodriguez)
+
+            # === 8️⃣ Peña–Rodríguez Test (PRnd) ===
             try:
-                pr_output = r('capture.output(print(PRnd(abs(y), m=6)))')
+                r('suppressMessages(library(NTS))')
+                # Run the PRnd R function and capture output
+                pr_output = r(f'capture.output(print(PRnd(abs(y), m={int(pp.do_slot("lag")[0])})))')
                 pr_line = pr_output[1]
-                tokens = re.split(r'\s+', pr_line.strip())
+                tokens = re.split(r'\\s+', pr_line.strip())
                 PR_stat = float(tokens[-2])
                 PR_pvalue = float(tokens[-1])
-            except Exception:
+            except Exception as e:
+                print(f"⚠️  PRnd test failed ({year}): {e}")
                 PR_stat, PR_pvalue = np.nan, np.nan
 
             # --- Collect results ---
             results_all.append({
                 "year": year,
-                "ADF_stat": adf_stat, "ADF_cval": adf_cval,
-                "DFGLS_stat": dfgls_stat, "DFGLS_cval": dfgls_cval,
-                "PP_stat": pp_stat, "PP_cval": pp_cval,
-                "KPSS_stat": kpss_stat, "KPSS_cval": kpss_cval,
+                "ADF_stat": ADF_stat, "ADF_cval": ADF_cval,
+                "DFGLS_stat": DFGLS_stat, "DFGLS_cval": DFGLS_cval,
+                "PP_stat": PP_stat, "PP_cval": PP_cval,
+                "KPSS_stat": KPSS_stat, "KPSS_cval": KPSS_cval,
                 "F_stat": F_stat, "F_pvalue": F_pvalue,
                 "TNT_stat": TNT_stat, "TNT_pvalue": TNT_pvalue,
                 "BDS_stat": bds_stat, "BDS_pvalue": bds_pvalue,
                 "PR_stat": PR_stat, "PR_pvalue": PR_pvalue
             })
 
-        # --- Combine all results ---
+        # --- Combine results ---
         df_out = pd.DataFrame(results_all)
         print("\n✅ Completed all R-based tests.")
 
-        # Save results to Excel
+        # --- Save results ---
         if save_path:
             file_name = f"{save_path}/annual_{y_res_col}_nonlinearity_R.xlsx"
             df_out.to_excel(file_name, index=False)
@@ -774,6 +786,7 @@ class USMEFAnalysis:
 
         return df_out
 
+        
     def mef_by_year(self, include_markov=True):
         """Estimate MEF by year using multiple methods"""
         df = self.data
