@@ -272,7 +272,7 @@ class USMEFAnalysis:
         # Equivalent to R:
         # lm(hourly_emissions ~ factorinterval*factormonth + factormonth*factoryear + factordow + trend)
         model_em = ols(
-            'hourly_emissions ~ C(factordow, Treatment(reference="Monday")) + factorinterval * factormonth + factormonth * factoryear + trend',
+            'hourly_emissions ~ C(factordow, Treatment(reference="Monday")) + factorinterval * factormonth + factormonth * factoryear  +  trend',
             data=df
         ).fit()
 
@@ -652,7 +652,7 @@ class USMEFAnalysis:
 
             
     def run_nonlinearity_tests_r(self, 
-                             y_col="hourly_emissions", 
+                             y_col="hourly_emissions_res", 
                              group_col="year",
                              save_path=None,
                              file_prefix="nonlinear_test"):
@@ -809,8 +809,8 @@ class USMEFAnalysis:
             from statsmodels.tools.tools import add_constant
             from statsmodels.stats.sandwich_covariance import cov_hac
             from statsmodels.tsa.regime_switching.markov_autoregression import MarkovAutoregression
-            from statsmodels.tsa.regime_switching.markov_regression import MarkovRegression
             from patsy import dmatrices
+            np.random.seed(987)
 
             df = self.data.copy()
             groups = sorted(df[group_col].unique())
@@ -831,13 +831,13 @@ class USMEFAnalysis:
                 # We use the same logic as your R code: remove seasonality, keep residuals + mean
                 
                 # Detrend hourly_emissions
-                y_formula = "hourly_emissions ~ C(factorinterval)*C(factormonth) + C(factordow) + trend"
+                y_formula = "hourly_emissions_mlb ~ C(factorinterval)*C(factormonth) + C(factordow) + trend"
                 y_y, y_X = dmatrices(y_formula, data=subset, return_type='dataframe')
                 y_model = OLS(y_y, y_X).fit()
                 subset['em_res'] = y_model.resid + y_model.params.iloc[0] 
 
                 # Detrend generation components
-                for col in ['hourly_generation_renewables', 'hourly_generation_nonrenewables']:
+                for col in ['hourly_generation_renewables_mkwh', 'hourly_generation_nonrenewables_mkwh']:
                     x_formula = f"{col} ~ C(factorinterval)*C(factormonth) + C(factordow) + trend"
                     x_y, x_X = dmatrices(x_formula, data=subset, return_type='dataframe')
                     x_model = OLS(x_y, x_X).fit()
@@ -846,32 +846,52 @@ class USMEFAnalysis:
                 #1.1 add a plot to see how the timeseries of Y and X appears 
                 #------------------------
                 
-                plt.plot(subset['date_hour'],subset['em_res'])
-                plt.show()
-                plt.plot(subset['date_hour'],subset['hourly_generation_renewables'])
-                plt.show()
-                plt.plot(subset['date_hour'],subset['hourly_generation_nonrenewables'])
-                plt.show()
+                # plt.plot(subset['date_hour'],subset['em_res'])
+                # plt.show()
+                # plt.plot(subset['date_hour'],subset['hourly_generation_renewables'])
+                # plt.show()
+                # plt.plot(subset['date_hour'],subset['hourly_generation_nonrenewables'])
+                # plt.show()
                 
+                
+                
+                #            # We include constant (intercept) for calculation, but extract the slope
+                # X_mef = add_constant(subset[['hourly_generation_renewables_mkwh', 'hourly_generation_nonrenewables_mkwh',]])
+                # ols_model = OLS(subset['hourly_emissions_mlb'], X_mef).fit()
+                # cov = cov_hac(ols_model, nlags=48) 
+               
+                # ols_mef = ols_model.params[target_col]
+                # ols_se = np.sqrt(cov[X_mef.columns.get_loc(target_col), X_mef.columns.get_loc(target_col)])
+
+
+
                 
                 # ------------------------
                 # 2. OLS MEF
                 # ------------------------
-                # We include constant (intercept) for calculation, but extract the slope
-                X_mef = add_constant(subset[['hourly_generation_renewables_res', 'hourly_generation_nonrenewables_res']])
-                ols_model = OLS(subset['em_res'], X_mef).fit()
+                target_col = 'hourly_generation_nonrenewables_mkwh'
+
+                # 2. Define the formula
+                formula = (
+                    'hourly_emissions_mlb ~ hourly_generation_renewables_mkwh + '
+                    'hourly_generation_nonrenewables_mkwh + '
+                    'C(factorinterval)*C(factormonth) + C(factordow)'
+                )
+                C02, X_mef = dmatrices(formula, data=subset, return_type='dataframe')
+                ols_model = OLS(C02, X_mef).fit()
                 cov = cov_hac(ols_model, nlags=48) 
-                
-                target_col = 'hourly_generation_nonrenewables_res'
+               
                 ols_mef = ols_model.params[target_col]
-                ols_se = np.sqrt(cov[X_mef.columns.get_loc(target_col), X_mef.columns.get_loc(target_col)])
+                col_index = X_mef.columns.get_loc(target_col)
+                ols_se = np.sqrt(cov[col_index, col_index])
+               
 
                 # ------------------------
                 # 3. First Differences (Hawkes)
                 # ------------------------
                 em_diff = subset['em_res'].diff()
-                gen_r_diff = subset['hourly_generation_renewables_res'].diff()
-                gen_nr_diff = subset['hourly_generation_nonrenewables_res'].diff()
+                gen_r_diff = subset['hourly_generation_renewables_mkwh_res'].diff()
+                gen_nr_diff = subset['hourly_generation_nonrenewables_mkwh_res'].diff()
                 
                 diff_df = pd.concat([em_diff, gen_r_diff, gen_nr_diff], axis=1).dropna()
                 diff_df.columns = ['d_em', 'd_ren', 'd_nonren']
@@ -907,7 +927,7 @@ class USMEFAnalysis:
                     # Step C: Fit the specific model with Exogenous Regressors
                     # Note: Your R code used 'hourly_generation_res'.
                     # Since your Python class splits this into Ren/NonRen, we use both as exog.
-                    arima_exog = subset[['hourly_generation_renewables_res', 'hourly_generation_nonrenewables_res']]
+                    arima_exog = subset[['hourly_generation_renewables_mkwh_res', 'hourly_generation_nonrenewables_mkwh_res']]
                     
                     arima_model = ARIMA(
                         endog=subset['em_res'],
@@ -916,9 +936,10 @@ class USMEFAnalysis:
                     ).fit()
                     
                     # Extract Results
-                    target_col = 'hourly_generation_nonrenewables_res'
+                    target_col = 'hourly_generation_nonrenewables_mkwh_res'
                     arima_mef = arima_model.params[target_col]
                     arima_se = arima_model.bse[target_col]
+                    
                 except:
                     arima_mef = arima_se = np.nan
 
@@ -926,7 +947,7 @@ class USMEFAnalysis:
                 # 5. Markov Switching MEF (SCALED & ROBUST)
                 # ------------------------
                 ms_high_mef = ms_high_se = ms_low_mef = ms_low_se = np.nan
-                p11 = p22 = dur_high = dur_low = np.nan
+                p11 = p00 = dur_high = dur_low = np.nan
 
                 if include_markov:
                     try:
@@ -940,26 +961,24 @@ class USMEFAnalysis:
                         # B. Scale variables
                         from sklearn.preprocessing import StandardScaler
                         scaler_y = StandardScaler()
-                        scaler_nonren = StandardScaler()
-                        scaler_ren = StandardScaler()
+                        scaler_x = StandardScaler()
 
                         ms_data['em_scaled'] = scaler_y.fit_transform(ms_data[['em_res']])
-                        ms_data['nonren_scaled'] = scaler_nonren.fit_transform(ms_data[['hourly_generation_nonrenewables_res']])
-                        ms_data['ren_scaled'] = scaler_ren.fit_transform(ms_data[['hourly_generation_renewables_res']])
+                        
+                        X_unscaled = ms_data[['hourly_generation_renewables_mkwh_res', 'hourly_generation_nonrenewables_mkwh_res']]
+                        X_scaled_array = scaler_x.fit_transform(X_unscaled)
                         
                         y_scaled = ms_data['em_scaled']
                         
                         # C. Create exog WITHOUT manual constant
-                        X_scaled = pd.DataFrame({
-                            'gen_ren': ms_data['ren_scaled'],
-                            'gen_nonren': ms_data['nonren_scaled']
-                        })
+                        X_scaled = pd.DataFrame(X_scaled_array, columns=['gen_ren', 'gen_nonren'])
 
                         # D. Model with trend='c' (let the model add the constant) # Replicate R's sw=c(T,T,T,F)
-                        ms_model = MarkovRegression(
+                        ms_model = MarkovAutoregression(
                             endog=y_scaled,
                             exog=X_scaled,
                             k_regimes=2,
+                            order =1,
                             trend = 'c',
                             switching_trend=True,
                             switching_exog=[True, True],  # Allow slopes to switch
@@ -967,49 +986,47 @@ class USMEFAnalysis:
                         )
 
                         # E. Fit with better initialization
-                        ms_results = ms_model.fit(
-                            method='powell',
-                            maxiter=1000,
-                            em_iter=20,  #  Better initialization
-                            search_reps=5
-                        )
-                        
+                        ms_results = ms_model.fit()
                         print(ms_results.summary())
-                        print(ms_results.param_names)
-
+                        
                         # F. Extract and UNSCALE coefficients
-                        # Get scaled coefficients
-                        beta0_scaled = ms_results.params.get('x2[1]', np.nan)
-                        beta1_scaled = ms_results.params.get('gen_nonren[1]', np.nan)
-                        se0_scaled = ms_results.bse.get('gen_nonren[0]', np.nan)
-                        se1_scaled = ms_results.bse.get('gen_nonren[1]', np.nan)
+                        # Get scaled coefficients and SE for the non-renewable generation term (the MEF)
+                        beta_nr_0_s = ms_results.params.get('x2[0]', np.nan)
+                        beta_nr_1_s = ms_results.params.get('x2[1]', np.nan)
+                        se_nr_0_s = ms_results.bse.get('x2[0]', np.nan)
+                        se_nr_1_s = ms_results.bse.get('x2[1]', np.nan)
 
-                        #  UNSCALE: multiply by (std_y / std_x)
+                        # UNSCALE: beta_unscaled = beta_scaled * (std_y / std_x)
                         scale_y = float(scaler_y.scale_[0])
-                        scale_nonren = float(scaler_nonren.scale_[0])
+                        # scaler_x.scale_ has scales for ['hourly_generation_renewables_res', 'hourly_generation_nonrenewables_res']
+                        scale_nonren = float(scaler_x.scale_[1])
                         convert_factor = scale_y / scale_nonren
                         
-                        val_0 = beta0_scaled * convert_factor
-                        val_1 = beta1_scaled * convert_factor
-                        se_0 = se0_scaled * convert_factor
-                        se_1 = se1_scaled * convert_factor
+                        beta_nr_0 = beta_nr_0_s * convert_factor
+                        beta_nr_1 = beta_nr_1_s * convert_factor
+                        se_nr_0 = se_nr_0_s * convert_factor
+                        se_nr_1 = se_nr_1_s * convert_factor
 
-                        # G. Sort regimes
-                        if val_0 > val_1:
-                            ms_high_mef, ms_low_mef = val_0, val_1
-                            ms_high_se, ms_low_se = se_0, se_1
-                            p11 = ms_results.params.get('p[0->0]', np.nan)
-                            p22 = ms_results.params.get('p[1->1]', np.nan)
+                        # G. Sort regimes based on the MEF value for non-renewable generation
+                        if beta_nr_0 > beta_nr_1:
+                            ms_high_mef, ms_low_mef = beta_nr_0, beta_nr_1
+                            ms_high_se, ms_low_se = se_nr_0, se_nr_1
+                            p00 = ms_results.params.get('p[0->0]', np.nan) # High MEF regime is regime 0
+                            p10 = ms_results.params.get('p[1->0]', np.nan) # Low MEF regime is regime 1
+                            p01 = 1 - p00
+                            p11 = 1 - p10
+                            
                         else:
-                            ms_high_mef, ms_low_mef = val_1, val_0
-                            ms_high_se, ms_low_se = se_1, se_0
-                            p11 = ms_results.params.get('p[1->1]', np.nan)
-                            p22 = ms_results.params.get('p[0->0]', np.nan)
+                            ms_high_mef, ms_low_mef = beta_nr_1, beta_nr_0
+                            ms_high_se, ms_low_se = se_nr_1, se_nr_0
+                            p10 = 1 - ms_results.params.get('p[0->0]', np.nan)  # Low MEF regime is regime 0
+                            p00 = 1 - ms_results.params.get('p[1->0]', np.nan)  # High MEF regime is regime 1
+                            p01 = 1 - p00
+                            p11 = 1 - p10
 
-                        p12 = 1 - p11
-                        p21 = 1 - p22
-                        dur_high = 1 / p12 if p12 > 1e-6 else np.inf
-                        dur_low = 1 / p21 if p21 > 1e-6 else np.inf
+                        
+                        dur_high = 1 / p01 if p01 > 1e-6 else np.inf
+                        dur_low = 1 / p10 if p10 > 1e-6 else np.inf
 
                     except Exception as e:
                         print(f"⚠️ MS estimation failed: {e}")
@@ -1017,8 +1034,8 @@ class USMEFAnalysis:
                 # ------------------------
                 # Aggregation
                 # ------------------------
-                avg_em = subset['hourly_emissions'].sum() / (
-                    subset['hourly_generation_renewables'].sum() + subset['hourly_generation_nonrenewables'].sum()
+                avg_em = subset['hourly_emissions_mlb'].sum() / (
+                    subset['hourly_generation_renewables_mkwh'].sum() + subset['hourly_generation_nonrenewables_mkwh'].sum()
                 )
 
                 results.append({
@@ -1028,13 +1045,136 @@ class USMEFAnalysis:
                     'ARIMA_MEF': arima_mef, 'ARIMA_SE': arima_se,
                     'MS_High_MEF': ms_high_mef, 'MS_High_SE': ms_high_se,
                     'MS_Low_MEF': ms_low_mef, 'MS_Low_SE': ms_low_se,
-                    'P11': p11, 'P22': p22,
+                    'P_high': p00, 'P_Low': p11,
                     'Dur_High': dur_high, 'Dur_Low': dur_low,
                     'Avg_Emissions': avg_em
                 })
 
             return pd.DataFrame(results)
+        
+    def plot_smoothed_probabilities(self, lags=1):
+        """
+        Fits a Markov Switching Model for the ENTIRE time series and plots:
+        1. Time Series Colored by Regime
+        2. Smoothed Probabilities
+        3. Viterbi Path (Most Likely Regime Sequence)
+        """
+        from statsmodels.tsa.regime_switching.markov_autoregression import MarkovAutoregression
+        from sklearn.preprocessing import StandardScaler
+        import matplotlib.patches as mpatches
 
+        if self.data is None:
+            raise ValueError("No data loaded. Run load_and_clean_data() first.")
+
+        # 1. Use Full Dataset
+        subset = self.data.copy().reset_index(drop=True)
+        
+        
+        # 2. Scale Variables (Crucial for convergence on large datasets)
+        print(" Scaling variables...")
+        scaler_y = StandardScaler()
+        scaler_x = StandardScaler()
+        
+        y_scaled = scaler_y.fit_transform(subset[['hourly_emissions_res']])
+        X_unscaled = subset[['hourly_generation_renewables_res', 'hourly_generation_nonrenewables_res']]
+          
+        X_scaled_array = scaler_x.fit_transform(X_unscaled)                # C. Create exog WITHOUT manual constant
+        X_scaled = pd.DataFrame(X_scaled_array, columns=['gen_ren', 'gen_nonren'])
+
+        # 3. Fit Markov Switching Model
+        print(f"⏳ Fitting MSM on full time series ({len(subset)} observations)... this may take a moment.")
+        ms_model = MarkovAutoregression(
+                            endog=y_scaled,
+                            exog=X_scaled,
+                            k_regimes=2,
+                            order =1,
+                            trend = 'c',
+                            switching_trend=True,
+                            switching_exog=[True, True],  # Allow slopes to switch
+                            switching_variance=False 
+                        )
+
+            
+        ms_results = ms_model.fit()
+        print(ms_results.summary())
+        
+        print("✅ Model fitted successfully.")
+
+        # 4. Extract Results
+
+        smoothed_prob_0, smoothed_prob_1 = zip(*ms_results.smoothed_marginal_probabilities)  # Transpose to DataFrame format
+        smoothed_probs = pd.DataFrame([smoothed_prob_0, smoothed_prob_1]).T
+        print(ms_results.params)
+        
+        # Identify High vs Low MEF Regime
+        beta_0 = ms_results.params[6]
+        beta_1 = ms_results.params[7]
+        print(f" Regime 0 MEF: {beta_0:.4f}, Regime 1 MEF: {beta_1:.4f}")
+        if beta_0 > beta_1:
+            high_regime = 0
+            low_regime = 1
+        else:
+            high_regime = 1
+            low_regime = 0
+            
+        print(f"🔹 Regime {high_regime} identified as HIGH MEF")
+        print(f"🔹 Regime {low_regime} identified as LOW MEF")
+        subset = subset.iloc[1:, :].reset_index(drop=True) # Adjust for initial missing due to AR(1)
+        # 5. Plotting
+        self.set_publication_style()
+        fig, axes = plt.subplots(3, 1, figsize=(12, 14), sharex=True)
+        
+        # Plot A: Time Series Colored by Regime
+        axes[0].set_title(f"A. Hourly Emissions Colored by Regime (Full Series)", loc='left', weight='bold')
+        axes[0].plot(subset['date_hour'], subset['hourly_emissions_res'], color='gray', alpha=0.3, lw=0.3, label='Observed')
+        
+        # Overlay High Regime (using a threshold, e.g., > 0.5)
+        high_mask = (smoothed_probs[high_regime]).values >= 0.5
+        # Use scatter with small markers for dense time series
+        axes[0].scatter(subset.loc[high_mask, 'date_hour'], subset.loc[high_mask, 'hourly_emissions_res'], 
+                       color='#d62728', s=0.5, alpha=0.5, label='High MEF Regime')
+        
+        # Overlay Low Regime
+        low_mask = (smoothed_probs[low_regime]).values>= 0.5
+        axes[0].scatter(subset.loc[low_mask, 'date_hour'], subset.loc[low_mask, 'hourly_emissions_res'], 
+                       color='#1f77b4', s=0.5, alpha=0.5, label='Low MEF Regime')
+        
+        axes[0].set_ylabel("Emissions (Residuals)")
+        # Custom legend to avoid clutter from scatter points
+        legend_elements = [
+            mpatches.Patch(color='gray', alpha=0.3, label='Observed'),
+            mpatches.Patch(color='#d62728', label='High MEF Regime'),
+            mpatches.Patch(color='#1f77b4', label='Low MEF Regime')
+        ]
+        axes[0].legend(handles=legend_elements, loc='upper right', frameon=True)
+
+        # Plot B: Smoothed Probabilities
+        axes[1].set_title("B. Smoothed Probability of High MEF Regime", loc='left', weight='bold')
+        # Plot area chart
+        axes[1].fill_between(subset['date_hour'], 0, smoothed_probs[high_regime], color='#d62728', alpha=0.3)
+        axes[1].plot(subset['date_hour'], smoothed_probs[high_regime], color='#d62728', lw=0.5)
+        axes[1].set_ylabel("Probability")
+        axes[1].set_ylim(0, 1.05)
+        
+        # Plot C: Viterbi Path (Discrete States)
+        axes[2].set_title("C. Viterbi Path (Most Likely Regime Sequence)", loc='left', weight='bold')
+        
+        # Map probabilities to discrete states
+        states = smoothed_probs.idxmax(axis=1)
+        binary_path = states.apply(lambda x: 1 if x == high_regime else 0)
+        
+        axes[2].step(subset['date_hour'], binary_path, where='mid', color='black', lw=0.8)
+        axes[2].set_yticks([0, 1])
+        axes[2].set_yticklabels(['Low MEF', 'High MEF'])
+        axes[2].set_ylabel("Regime")
+        axes[2].set_xlabel("Date")
+        
+        # Shade High MEF areas
+        axes[2].fill_between(subset['date_hour'], 0, 1, where=(binary_path==1), 
+                            color='#d62728', alpha=0.1, step='mid')
+
+        plt.tight_layout()
+        plt.show()
     
     def _plot_mef_by_year(self, results_df, include_markov=True):
         """Plot MEF estimates by year"""
