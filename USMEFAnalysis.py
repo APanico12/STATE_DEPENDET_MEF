@@ -1128,11 +1128,7 @@ class USMEFAnalysis:
         axes[0].set_title(f"A. Hourly Emissions Colored by Regime (Full Series)", loc='left', weight='bold')
         axes[0].plot(subset['date_hour'], subset['hourly_emissions_res'], color='gray', alpha=0.3, lw=0.3, label='Observed')
         
-        # Overlay High Regime (using a threshold, e.g., > 0.5)
-        high_mask = (smoothed_probs[high_regime]).values >= 0.5
-        # Use scatter with small markers for dense time series
-        axes[0].scatter(subset.loc[high_mask, 'date_hour'], subset.loc[high_mask, 'hourly_emissions_res'], 
-                       color='#d62728', s=0.5, alpha=0.5, label='High MEF Regime')
+        
         
         # Overlay Low Regime
         low_mask = (smoothed_probs[low_regime]).values>= 0.5
