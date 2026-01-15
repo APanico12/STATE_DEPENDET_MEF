@@ -134,15 +134,8 @@ class USMEFAnalysis:
         width_inches = width_mm / 25.4
         height_inches = width_inches * ratio
         return (width_inches, height_inches)
-
-    # --- USAGE EXAMPLE ---
-    # set_publication_style()
-    # fig, ax = plt.subplots(figsize=get_figsize(89)) # Single column width
-    # plt.plot([1, 2, 3], [1, 4, 9], label='Model A')
-    # plt.xlabel('Time (s)')
-    # plt.ylabel('Intensity (a.u.)')
-    # sns.despine() # Final cleanup    
-    def load_and_clean_data(self, start_date='2019-01-01', end_date='2025-09-30'):
+ 
+    def load_and_clean_data(self, start_date='2019-01-01', end_date='2025-12-31'):
         """Load and clean full EIA hourly dataset (Region_US48.xlsx)"""
 
         # --- Load Excel data ---
@@ -198,7 +191,6 @@ class USMEFAnalysis:
 
         return self.data
         
-    
     def create_time_variables(self):
         """Create time dummies and factor variables"""
         df = self.data
@@ -208,7 +200,7 @@ class USMEFAnalysis:
         df['year'] = df['bid_offer_date'].dt.year
         df['day'] = df['bid_offer_date'].dt.day_name()
         df['dom'] = df['bid_offer_date'].dt.day
-        
+        #print(f'month : {df["month"]}, year : {df["year"]}, day : {df["dom"]}')
         # Month dummies
         for i in range(1, 13):
             df[f'm{i}'] = (df['month'] == i).astype(int)
@@ -263,8 +255,7 @@ class USMEFAnalysis:
         
         return df
     
-    def seasonal_adjustment(self):
-   
+    def seasonal_adjustment_iteraction(self):
 
         df = self.data.copy()
 
@@ -272,40 +263,41 @@ class USMEFAnalysis:
         # Equivalent to R:
         # lm(hourly_emissions ~ factorinterval*factormonth + factormonth*factoryear + factordow + trend)
         model_em = ols(
-            'hourly_emissions ~ C(factordow, Treatment(reference="Monday")) + factorinterval * factormonth + factormonth * factoryear  +  trend',
+            'hourly_emissions_mlb ~ C(factordow, Treatment(reference="Monday")) + C(factorinterval)*C(factormonth) + C(factormonth)*C(factoryear) + trend',
             data=df
         ).fit()
-
+        print(model_em.summary())
         # Deseasoned & detrended emissions
-        df['hourly_emissions_res'] = model_em.resid + model_em.params['Intercept']
+        df['hourly_emissions_res_2'] = model_em.resid + model_em.params['Intercept']
 
         # ---- Generation model ----
         # Equivalent to R:
         # lm(hourly_generation ~ factorinterval*factormonth + factormonth*factoryear + factordow + trend)
         model_gen = ols(
-            'hourly_generation ~ C(factordow, Treatment(reference="Monday")) + factorinterval * factormonth + factormonth * factoryear + trend',
+            'hourly_generation_mkwh ~ C(factordow, Treatment(reference="Monday")) + C(factorinterval)*C(factormonth) + C(factormonth)*C(factoryear) + trend',
             data=df
         ).fit()
-
+        print(model_gen.summary())
         # Deseasoned & detrended generation
-        df['hourly_generation_res'] = model_gen.resid + model_gen.params['Intercept']
+        df['hourly_generation_res_2'] = model_gen.resid + model_gen.params['Intercept']
         
         #same for hourly_generation_renewables
         model_gen_r = ols(
-            'hourly_generation_renewables ~ C(factordow, Treatment(reference="Monday")) + factorinterval * factormonth + factormonth * factoryear + trend',
+            'hourly_generation_renewables_mkwh ~  C(factordow, Treatment(reference="Monday")) + C(factorinterval)*C(factormonth) + C(factormonth)*C(factoryear) + trend',
             data=df
         ).fit()
-
+        print(model_gen_r.summary())
         # Deseasoned & detrended renewable generation
-        df['hourly_generation_renewables_res'] = model_gen_r.resid + model_gen_r.params['Intercept']
+        df['hourly_generation_renewables_res_2'] = model_gen_r.resid + model_gen_r.params['Intercept']
         
         #same for hourly_generation_nonrenewables
         model_gen_nr = ols(
-            'hourly_generation_nonrenewables ~ C(factordow, Treatment(reference="Monday")) + factorinterval * factormonth + factormonth * factoryear + trend',
+            'hourly_generation_nonrenewables_mkwh ~ C(factordow, Treatment(reference="Monday")) + C(factorinterval)*C(factormonth) + C(factormonth)*C(factoryear) + trend',
             data=df
         ).fit()
         # Deseasoned & detrended non-renewable generation
-        df['hourly_generation_nonrenewables_res'] = model_gen_nr.resid + model_gen_nr.params['Intercept']
+        df['hourly_generation_nonrenewables_res_2'] = model_gen_nr.resid + model_gen_nr.params['Intercept']
+        print(model_gen_nr.summary())
         
         # ---- Save results ----
         self.data = df
@@ -319,7 +311,63 @@ class USMEFAnalysis:
         print(f"Non-Renewable Generation Coefficients: {len(model_gen_nr.params)} terms")
 
         return df
+    
+    def seasonal_adjustment(self):
+   
+        df = self.data.copy()
+
+        # ---- Emissions model ----
+        # Equivalent to R:
+        # lm(hourly_emissions ~ factorinterval*factormonth + factormonth*factoryear + factordow + trend)
+        model_em = ols(
+            'hourly_emissions_mlb ~ C(factordow, Treatment(reference="Monday")) + C(factorinterval) + C(factormonth) + C(factoryear)',
+            data=df
+        ).fit()
+        print(model_em.summary())
+        # Deseasoned & detrended emissions
+        df['hourly_emissions_res'] = model_em.resid + model_em.params['Intercept']
+
+        # ---- Generation model ----
+        # Equivalent to R:
+        # lm(hourly_generation ~ factorinterval*factormonth + factormonth*factoryear + factordow + trend)
+        model_gen = ols(
+            'hourly_generation_mkwh ~ C(factordow, Treatment(reference="Monday")) + C(factorinterval) + C(factormonth) + C(factoryear) ',
+            data=df
+        ).fit()
+        print(model_gen.summary())
+        # Deseasoned & detrended generation
+        df['hourly_generation_res'] = model_gen.resid + model_gen.params['Intercept']
         
+        #same for hourly_generation_renewables
+        model_gen_r = ols(
+            'hourly_generation_renewables_mkwh ~ C(factordow, Treatment(reference="Monday")) + C(factorinterval) + C(factormonth) + C(factoryear)',
+            data=df
+        ).fit()
+        print(model_gen_r.summary())
+        # Deseasoned & detrended renewable generation
+        df['hourly_generation_renewables_res'] = model_gen_r.resid + model_gen_r.params['Intercept']
+        
+        #same for hourly_generation_nonrenewables
+        model_gen_nr = ols(
+            'hourly_generation_nonrenewables_mkwh ~ C(factordow, Treatment(reference="Monday")) + C(factorinterval) + C(factormonth) + C(factoryear)',
+            data=df
+        ).fit()
+        # Deseasoned & detrended non-renewable generation
+        df['hourly_generation_nonrenewables_res'] = model_gen_nr.resid + model_gen_nr.params['Intercept']
+        print(model_gen_nr.summary())
+        # ---- Save results ----
+        self.data = df
+
+        print("\n✅ Seasonal & Trend Adjustment Completed")
+        print(f"Emissions R²:  {model_em.rsquared:.4f}")
+        print(f"Generation R²: {model_gen.rsquared:.4f}")
+        print(f"Emissions Coefficients: {len(model_em.params)} terms")
+        print(f"Generation Coefficients: {len(model_gen.params)} terms")
+        print(f"Renewable Generation Coefficients: {len(model_gen_r.params)} terms")
+        print(f"Non-Renewable Generation Coefficients: {len(model_gen_nr.params)} terms")
+
+        return df
+    
     def summary_statistics_by_season(self):
         """Calculate summary statistics by season"""
         df = self.data
@@ -412,7 +460,6 @@ class USMEFAnalysis:
         plt.show()
         return fig    
     
-    
     def plot_annual_diagnostics_dynamic(self, lags=100, save_path=None):
         """
         Dynamic version: Recalculates residuals each year using regression
@@ -485,6 +532,80 @@ class USMEFAnalysis:
             if save_path:
                 fig.savefig(f"{save_path}/ACF_PACF_Emissions_{year}.png", dpi=300, bbox_inches='tight')
             plt.show()
+    
+    def plot_annual_diagnostics_dynamic_linear(self, lags=100, save_path=None):
+        """
+        Dynamic version: Recalculates residuals each year using regression
+        similar to the R script.
+        """
+        if self.data is None:
+            raise ValueError("No data loaded. Run load_and_clean_data() first.")
+
+        self.set_publication_style()
+
+        df = self.data.copy()
+        df['date_hourx'] = pd.to_datetime(df['date_hour'], utc=True, errors='coerce')
+        years = sorted(df['year'].unique())
+        print(f"🧭 Found {len(years)} years: {years}")
+
+        for year in years:
+            print(f"\n📅 Processing {year}...")
+            df_year = df[df['year'] == year].copy()
+
+            # Recalculate hourly generation residuals
+            model_gen = ols("hourly_generation ~ factorinterval + factormonth + factordow + trend", data=df_year).fit()
+            df_year['hourly_generation_res'] = model_gen.resid + model_gen.params[0]
+
+            # Recalculate hourly emissions residuals
+            model_em = ols("hourly_emissions ~ factorinterval + factormonth + factordow + trend", data=df_year).fit()
+            df_year['hourly_emissions_res'] = model_em.resid + model_em.params[0]
+
+            # --- Plot generation residuals ---
+            self.elegant_plot(
+                df_year['date_hourx'], df_year['hourly_generation_res'],
+                f"Hourly Load – Deseasoned & Detrended ({year})",
+                "Hourly load (MWh)", save_path=save_path
+            )
+
+            # --- ACF/PACF for generation ---
+            fig, ax = plt.subplots(2, 1, figsize=self.get_figsize(89 * 2))
+            plot_acf(df_year['hourly_generation_res'].dropna(), lags=lags, ax=ax[0], color="#1f77b4", zero=False)
+            plot_pacf(df_year['hourly_generation_res'].dropna(), lags=lags, ax=ax[1], color="#ff7f0e", zero=False, method="ywm")
+
+            for i, title in enumerate(["ACF – Hourly Load", "PACF – Hourly Load"]):
+                ax[i].set_title(f"{title} ({year})", loc='left', pad=10, weight='bold')
+                ax[i].set_ylim(-1.05, 1.05)
+                ax[i].spines[['top', 'right']].set_visible(False)
+                ax[i].grid(True, alpha=0.3)
+
+            fig.tight_layout()
+            if save_path:
+                fig.savefig(f"{save_path}/ACF_PACF_Load_{year}.png", dpi=300, bbox_inches='tight')
+            plt.show()
+
+            # --- Plot emissions residuals ---
+            self.elegant_plot(
+                df_year['date_hourx'], df_year['hourly_emissions_res'],
+                f"Hourly Emissions – Deseasoned & Detrended ({year})",
+                "Hourly emissions (metric tons CO₂)", save_path=save_path
+            )
+
+            # --- ACF/PACF for emissions ---
+            fig, ax = plt.subplots(2, 1, figsize=self.get_figsize(89 * 2))
+            plot_acf(df_year['hourly_emissions_res'].dropna(), lags=lags, ax=ax[0], color="#1f77b4", zero=False)
+            plot_pacf(df_year['hourly_emissions_res'].dropna(), lags=lags, ax=ax[1], color="#ff7f0e", zero=False, method="ywm")
+
+            for i, title in enumerate(["ACF – Hourly Emissions", "PACF – Hourly Emissions"]):
+                ax[i].set_title(f"{title} ({year})", loc='left', pad=10, weight='bold')
+                ax[i].set_ylim(-1.05, 1.05)
+                ax[i].spines[['top', 'right']].set_visible(False)
+                ax[i].grid(True, alpha=0.3)
+
+            fig.tight_layout()
+            if save_path:
+                fig.savefig(f"{save_path}/ACF_PACF_Emissions_{year}.png", dpi=300, bbox_inches='tight')
+            plt.show()    
+    
         
     def plot_seasonal_diagnostics_dynamic(self, lags=100, save_path=None):
         """
@@ -508,7 +629,7 @@ class USMEFAnalysis:
         df = self.data.copy()
         df['date_hourx'] = pd.to_datetime(df['date_hour'], utc=True, errors='coerce')
         seasons = sorted(df['yearseasonv2'].dropna().unique())
-        print(f"🍂 Found {len(seasons)} seasonal groups: {seasons}")
+        print(f"Found {len(seasons)} seasonal groups: {seasons}")
 
         for season in seasons:
             print(f"\n📅 Processing season: {season}")
@@ -530,7 +651,7 @@ class USMEFAnalysis:
             )
 
             # --- ACF/PACF for generation ---
-            fig, ax = plt.subplots(2, 1, figsize=self.get_figsize(89 * 2))
+            fig, ax = plt.subplots(2, 1, figsize=self.get_figsize(10 * 2))
             plot_acf(df_season['hourly_generation_res'].dropna(), lags=lags, ax=ax[0], color="#1f77b4", zero=False)
             plot_pacf(df_season['hourly_generation_res'].dropna(), lags=lags, ax=ax[1], color="#ff7f0e", zero=False, method="ywm")
 
@@ -553,7 +674,7 @@ class USMEFAnalysis:
             )
 
             # --- ACF/PACF for emissions ---
-            fig, ax = plt.subplots(2, 1, figsize=self.get_figsize(89 * 2))
+            fig, ax = plt.subplots(2, 1, figsize=self.get_figsize(10 * 2))
             plot_acf(df_season['hourly_emissions_res'].dropna(), lags=lags, ax=ax[0], color="#1f77b4", zero=False)
             plot_pacf(df_season['hourly_emissions_res'].dropna(), lags=lags, ax=ax[1], color="#ff7f0e", zero=False, method="ywm")
 
@@ -569,88 +690,7 @@ class USMEFAnalysis:
             plt.show()
             print("\n✅ Seasonal diagnostics (dynamic residuals) completed.")
     
-    def plot_lag_nonlinearity(
-            self, variable="hourly_emissions_res", lag=1, year=None,
-            frac=0.2, save_path=None
-        ):
-            """
-            Plot x_t vs x_{t-lag} with LOESS smoothing to visualize nonlinearity.
-            Optimized for one-column journal figures (Tsay, 2019 style).
-            """
-            import matplotlib.pyplot as plt
-            import numpy as np
-            from statsmodels.nonparametric.smoothers_lowess import lowess
-
-            if self.data is None:
-                raise ValueError("No data loaded. Run load_and_clean_data() first.")
-            if variable not in self.data.columns:
-                raise ValueError(f"Column '{variable}' not found. Did you run seasonal_adjustment()?")
-
-            # --- Data selection ---
-            df_plot = self.data.copy()
-            if year:
-                df_plot = df_plot[df_plot["year"] == year]
-                time_label = str(year)
-            else:
-                time_label = "Full Sample"
-
-            y_t = df_plot[variable]
-            x_t_lag = df_plot[variable].shift(lag)
-            mask = ~np.isnan(x_t_lag) & ~np.isnan(y_t)
-            x_vals, y_vals = x_t_lag[mask], y_t[mask]
-
-            print(f"⏳ Calculating LOESS smoothing (n={len(x_vals)}, lag={lag})...")
-            z = lowess(y_vals, x_vals, frac=frac, it=0)
-
-            # --- Figure settings for one-column layout ---
-            plt.style.use("seaborn-v0_8-white")
-            fig, ax = plt.subplots(figsize=self.get_figsize(89*2)) # ~89 mm × 66 mm
-
-            # --- Scatter plot ---
-            ax.scatter(
-                x_vals, y_vals, alpha=0.15, s=3.5,
-                color="#2c3e50", label="Observations", edgecolor="none"
-            )
-
-            # --- LOESS line ---
-            ax.plot(
-                z[:, 0], z[:, 1],
-                color="#e74c3c", linewidth=0.9,
-                label=f"LOESS (frac={frac})"
-            )
-
-            # --- Styling ---
-            ax.set_title(
-                f"Nonlinearity Check ({time_label})", loc="left", fontsize=8, fontweight="bold"
-            )
-            ax.set_xlabel(f"$x_{{t-{lag}}}$", fontsize=7)
-            ax.set_ylabel(f"$x_t$", fontsize=7)
-
-            # Reference lines
-            ax.axhline(0, color="black", linewidth=0.4, linestyle="--", alpha=0.5)
-            ax.axvline(0, color="black", linewidth=0.4, linestyle="--", alpha=0.5)
-
-            # Axis limits with small margins
-            x_margin = 0.05 * (x_vals.max() - x_vals.min())
-            y_margin = 0.05 * (y_vals.max() - y_vals.min())
-            ax.set_xlim(x_vals.min() - x_margin, x_vals.max() + x_margin)
-            ax.set_ylim(y_vals.min() - y_margin, y_vals.max() + y_margin)
-
-            # Compact ticks and font sizes
-            ax.tick_params(axis="both", labelsize=6, width=0.3, pad=2)
-            ax.legend(frameon=False, fontsize=6, loc="best", handlelength=1.5)
-
-            plt.tight_layout(pad=0.5)
-
-            # --- Save or show ---
-            if save_path:
-                filename = f"{save_path}/Lag{lag}_{variable}_{year}.pdf"
-                plt.savefig(filename, bbox_inches="tight", dpi=600)
-                print(f"💾 Figure saved to: {filename}")
-            else:
-                plt.show()
-
-            
+        
     def run_nonlinearity_tests_r(self, 
                              y_col="hourly_emissions_res", 
                              group_col="year",
@@ -798,8 +838,6 @@ class USMEFAnalysis:
             print(f"💾 Saved to: {fname}")
 
         return df_out
-
-       
         
     def mef_estimate(self, group_col='year', include_markov=True):
             import numpy as np
@@ -831,41 +869,18 @@ class USMEFAnalysis:
                 # We use the same logic as your R code: remove seasonality, keep residuals + mean
                 
                 # Detrend hourly_emissions
-                y_formula = "hourly_emissions_mlb ~ C(factorinterval)*C(factormonth) + C(factordow) + trend"
+                y_formula = "hourly_emissions_mlb ~ C(factordow, Treatment(reference='Monday')) + C(factorinterval)*C(factormonth)"
                 y_y, y_X = dmatrices(y_formula, data=subset, return_type='dataframe')
                 y_model = OLS(y_y, y_X).fit()
                 subset['em_res'] = y_model.resid + y_model.params.iloc[0] 
 
                 # Detrend generation components
                 for col in ['hourly_generation_renewables_mkwh', 'hourly_generation_nonrenewables_mkwh']:
-                    x_formula = f"{col} ~ C(factorinterval)*C(factormonth) + C(factordow) + trend"
+                    x_formula = f"{col} ~ C(factordow, Treatment(reference='Monday')) + C(factorinterval)*C(factormonth)"
                     x_y, x_X = dmatrices(x_formula, data=subset, return_type='dataframe')
                     x_model = OLS(x_y, x_X).fit()
                     subset[col + '_res'] = x_model.resid + x_model.params.iloc[0]
-                #------------------------
-                #1.1 add a plot to see how the timeseries of Y and X appears 
-                #------------------------
-                
-                # plt.plot(subset['date_hour'],subset['em_res'])
-                # plt.show()
-                # plt.plot(subset['date_hour'],subset['hourly_generation_renewables'])
-                # plt.show()
-                # plt.plot(subset['date_hour'],subset['hourly_generation_nonrenewables'])
-                # plt.show()
-                
-                
-                
-                #            # We include constant (intercept) for calculation, but extract the slope
-                # X_mef = add_constant(subset[['hourly_generation_renewables_mkwh', 'hourly_generation_nonrenewables_mkwh',]])
-                # ols_model = OLS(subset['hourly_emissions_mlb'], X_mef).fit()
-                # cov = cov_hac(ols_model, nlags=48) 
-               
-                # ols_mef = ols_model.params[target_col]
-                # ols_se = np.sqrt(cov[X_mef.columns.get_loc(target_col), X_mef.columns.get_loc(target_col)])
-
-
-
-                
+              
                 # ------------------------
                 # 2. OLS MEF
                 # ------------------------
@@ -899,6 +914,20 @@ class USMEFAnalysis:
                 diff_model = OLS(diff_df['d_em'], add_constant(diff_df[['d_ren', 'd_nonren']])).fit()
                 diff_mef = diff_model.params['d_nonren']
                 diff_se = diff_model.bse['d_nonren']
+                
+                # ------------------------
+                # 3. First Differences (Hawkes)
+                # ------------------------
+                em_diff = subset['hourly_emissions_mlb'].diff()
+                gen_r_diff = subset['hourly_generation_renewables_mkwh'].diff()
+                gen_nr_diff = subset['hourly_generation_nonrenewables_mkwh'].diff()
+                
+                diff_df = pd.concat([em_diff, gen_r_diff, gen_nr_diff], axis=1).dropna()
+                diff_df.columns = ['d_em', 'd_ren', 'd_nonren']
+                
+                diff_model_2 = OLS(diff_df['d_em'], add_constant(diff_df[['d_ren', 'd_nonren']])).fit()
+                diff_mef_2 = diff_model_2.params['d_nonren']
+                diff_se_2 = diff_model_2.bse['d_nonren']
 
                 # ------------------------
                 # 4. ARIMA MEF
@@ -920,7 +949,7 @@ class USMEFAnalysis:
                     # Extract orders
                     # auto_model.order returns (p, d, q)
                     _, d_opt, q_opt = auto_model.order
-                    
+                    print(f"   ARIMA orders selected: d={d_opt}, q={q_opt}")
                     # Step B: Force p=1 (as per R code: order = c(1,d,q))
                     final_order = (1, d_opt, q_opt)
                     
@@ -1042,6 +1071,7 @@ class USMEFAnalysis:
                     group_col: group,
                     'OLS_MEF': ols_mef, 'OLS_SE': ols_se,
                     'Diff_MEF': diff_mef, 'Diff_SE': diff_se,
+                    'Diff_MEF_2': diff_mef_2, 'Diff_SE_2': diff_se_2,
                     'ARIMA_MEF': arima_mef, 'ARIMA_SE': arima_se,
                     'MS_High_MEF': ms_high_mef, 'MS_High_SE': ms_high_se,
                     'MS_Low_MEF': ms_low_mef, 'MS_Low_SE': ms_low_se,
@@ -1063,8 +1093,6 @@ class USMEFAnalysis:
         from sklearn.preprocessing import StandardScaler
         import matplotlib.patches as mpatches
 
-        if self.data is None:
-            raise ValueError("No data loaded. Run load_and_clean_data() first.")
 
         # 1. Use Full Dataset
         subset = self.data.copy().reset_index(drop=True)
@@ -1172,11 +1200,12 @@ class USMEFAnalysis:
         plt.tight_layout()
         plt.show()
     
-    def _plot_mef_by_year(self, results_df, include_markov=True):
+    def plot_mef_by_year(self, results_df, include_markov=True):
         """Plot MEF estimates by year"""
         fig, ax = plt.subplots(figsize=(14, 8))
         
-        years = results_df['Year']
+        years = results_df['year']
+        self.set_publication_style()
         
         # OLS with CI
         ax.errorbar(years, results_df['OLS_MEF'], 
@@ -1185,25 +1214,25 @@ class USMEFAnalysis:
                    linewidth=2.5, color='orange')
         
         # Differences with CI
-        ax.errorbar(years + 0.05, results_df['Diff_MEF'],
+        ax.errorbar(years , results_df['Diff_MEF'],
                    yerr=1.96*results_df['Diff_SE'],
                    fmt='s-', label='Differences', markersize=8, capsize=5, capthick=2,
                    linewidth=2, color='gray', alpha=0.8)
         
         # ARIMA with CI
-        ax.errorbar(years + 0.1, results_df['ARIMA_MEF'],
+        ax.errorbar(years , results_df['ARIMA_MEF'],
                    yerr=1.96*results_df['ARIMA_SE'],
                    fmt='^-', label='ARIMA', markersize=8, capsize=5, capthick=2,
                    linewidth=2, color='red', alpha=0.8)
         
         # Markov Switching
         if include_markov and 'MS_High_MEF' in results_df.columns:
-            ax.errorbar(years + 0.15, results_df['MS_High_MEF'],
+            ax.errorbar(years, results_df['MS_High_MEF'],
                        yerr=1.96*results_df['MS_High_SE'],
                        fmt='d-', label='MS-High', markersize=8, capsize=5, capthick=2,
                        linewidth=2, color='blue', alpha=0.8)
             
-            ax.errorbar(years + 0.2, results_df['MS_Low_MEF'],
+            ax.errorbar(years, results_df['MS_Low_MEF'],
                        yerr=1.96*results_df['MS_Low_SE'],
                        fmt='v-', label='MS-Low', markersize=8, capsize=5, capthick=2,
                        linewidth=2, color='purple', alpha=0.8)
@@ -1214,7 +1243,7 @@ class USMEFAnalysis:
                linewidth=2.5, color='pink')
         
         ax.set_xlabel('Year', fontsize=14, fontweight='bold')
-        ax.set_ylabel('MEF (kg CO₂/kWh)', fontsize=14, fontweight='bold')
+        ax.set_ylabel('MEF (kg CO2/kWh)', fontsize=14, fontweight='bold')
         ax.set_title('US MEF Estimates by Year and Method', 
                     fontsize=17, fontweight='bold')
         ax.legend(fontsize=11, loc='best', framealpha=0.9)
@@ -1227,60 +1256,10 @@ class USMEFAnalysis:
         # Plot transition probabilities if available
         if include_markov and 'P11' in results_df.columns:
             self._plot_transition_probs(results_df)
+            
+   
     
-    def mef_by_season(self):
-        """Estimate MEF by season"""
-        df = self.data
-        seasons = sorted(df['yearseason'].unique())
-        
-        results = []
-        
-        for season in seasons:
-            season_data = df[df['yearseason'] == season].copy()
-            
-            # Skip if too few observations
-            if len(season_data) < 100:
-                continue
-            
-            # Seasonal adjustment
-            X = pd.get_dummies(season_data[['factorinterval', 'factormonth', 'factordow']], 
-                              drop_first=True)
-            X['trend'] = np.arange(len(season_data))
-            X = add_constant(X)
-            
-            em_model = OLS(season_data['hourly_emissions'], X).fit()
-            season_data['em_res'] = em_model.resid + em_model.params['const']
-            
-            gen_model = OLS(season_data['hourly_generation'], X).fit()
-            season_data['gen_res'] = gen_model.resid + gen_model.params['const']
-            
-            # OLS MEF
-            X_mef = add_constant(season_data['gen_res'])
-            ols_model = OLS(season_data['em_res'], X_mef).fit()
-            
-            ols_mef = ols_model.params['gen_res']
-            ols_se = ols_model.bse['gen_res']
-            
-            # Average emissions
-            avg_em = season_data['hourly_emissions'].sum() / season_data['hourly_generation'].sum()
-            
-            results.append({
-                'Season': season,
-                'OLS_MEF': ols_mef,
-                'OLS_SE': ols_se,
-                'Avg_Emissions': avg_em,
-                'N': len(season_data)
-            })
-        
-        results_df = pd.DataFrame(results)
-        
-        print("\n" + "="*80)
-        print("MEF ESTIMATES BY SEASON")
-        print("="*80)
-        print(results_df.to_string(index=False, float_format=lambda x: f'{x:.6f}'))
-        print("="*80)
-        
-        return results_df
+
 
 
 # Example usage
