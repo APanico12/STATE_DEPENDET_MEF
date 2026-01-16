@@ -7,6 +7,7 @@ from tracemalloc import start
 import pandas as pd
 import numpy as np
 import matplotlib.pyplot as plt
+from scipy import io
 import seaborn as sns
 from datetime import datetime
 import matplotlib as mpl
@@ -19,7 +20,7 @@ from statsmodels.formula.api import ols
 from statsmodels.tsa.regime_switching.markov_autoregression import MarkovAutoregression
 from sklearn.preprocessing import StandardScaler
 from joblib import Parallel, delayed
-    
+import io    
 plt.style.use('seaborn-v0_8-darkgrid')
 sns.set_palette("Set2")
 
@@ -147,6 +148,7 @@ class LightMEF:
         rename_map = {
             'Demand': 'D',
             'Net generation': 'NG',
+            'Hour': 'Local_Hour',
             'Sum (NG)': 'hourly_generation',
             'CO2 Emissions Generated': 'hourly_emissions',
             'CO2 Emissions Intensity for Generated Electricity': 'CO2EmissionsIntensity',
@@ -168,7 +170,7 @@ class LightMEF:
         # --- Select final columns  ---
         keep_cols = [
             'bid_offer_date', 'interval', 'date_hour', 
-            'D', 'NG',
+            'D', 'NG','Local_Hour',
             'hourly_generation','hourly_generation_renewables','hourly_generation_nonrenewables', 'hourly_emissions',  
             'hourly_emissions_mlb', 'hourly_generation_mkwh','hourly_generation_renewables_mkwh','hourly_generation_nonrenewables_mkwh'
         ]
@@ -537,7 +539,7 @@ class LightMEF:
 
     def _fit_single_msm(self, subset_df, period, hour, max_iter, search_reps):
         """Helper function to fit a single MSM model for one hour."""
-        subset_hour = subset_df[subset_df['interval'] == hour]
+        subset_hour = subset_df[subset_df['Local_Hour'] == hour]
         # Calculate average load
         average_load = subset_hour['D'].mean()
         # Scale variables
@@ -579,6 +581,152 @@ class LightMEF:
         beta_low_regime = beta_low_regime_s * convert_factor
         
         return (hour, period, beta_low_regime, beta_high_regime, average_load)
+
+    def plot_mef_analysis_hourly(self, data_input):
+        """
+        Generates a 2-panel plot with:
+        - MEF Y-axis range: 0.85 to 1.65
+        - Load histogram visually occupies exactly 1/3 of plot height
+        - Load axis ticks only where histogram ends
+        - Two separate histograms for each period
+        - Single centered legend below both plots with larger size
+        """
+        self.set_publication_style()
+        
+        # 1. Load Data
+
+        df = data_input
+
+        # 2. Prepare Data
+        periods = df['period'].unique()
+        
+        # Calculate hourly load for EACH period separately
+        hourly_load_by_period = {}
+        for period in periods:
+            period_data = df[df['period'] == period]
+            hourly_load_by_period[period] = period_data.groupby('hour')['average_load'].mean()
+        
+        # Get overall max for consistent scaling
+        all_loads = pd.concat(hourly_load_by_period.values())
+        load_max_value = all_loads.max()
+
+        # 3. Setup Plot with space for legend at bottom
+        fig, axes = plt.subplots(1, 2, figsize=(16, 6))
+        
+        plot_configs = [
+            {'col': 'beta_low', 'ax': axes[0], 'title': 'Low Marginal Emissions (Hourly)', 'ylabel': 'Marginal $CO_2$ Emissions'},
+            {'col': 'beta_high', 'ax': axes[1], 'title': 'High Marginal Emissions (Hourly)', 'ylabel': 'Marginal $CO_2$ Emissions'}
+        ]
+
+        # MEF axis constraints
+        MEF_MIN = 0.8
+        MEF_MAX = 1.7
+        MEF_RANGE = MEF_MAX - MEF_MIN
+        
+        # Bar colors for the two periods
+        bar_colors = ['#ffcccc', '#ff9999']  # Light pink and darker pink
+        bar_alphas = [0.3, 0.5]
+        
+        # Store handles and labels for the legend
+        all_handles = []
+        all_labels = []
+        
+        for idx, config in enumerate(plot_configs):
+            ax = config['ax']
+            col_name = config['col']
+            
+            # --- Primary Axis: MEF Lines ---
+            linestyles = ['-', '--']
+            colors = ['#1f77b4', '#aec7e8']  # Darker and lighter blue
+            
+            for i, period in enumerate(periods):
+                subset = df[df['period'] == period]
+                line, = ax.plot(subset['hour'], subset[col_name], 
+                        color=colors[i % len(colors)], 
+                        linewidth=2.5, 
+                        linestyle=linestyles[i % len(linestyles)],
+                        zorder=3)
+                
+                # Collect handles only from first plot to avoid duplicates
+                if idx == 0:
+                    all_handles.append(line)
+                    all_labels.append(period)
+
+            # --- MEF Axis limits ---
+            ax.set_ylim(MEF_MIN, MEF_MAX)
+
+            # Format Primary Axis
+            ax.set_title(config['title'], fontsize=13, pad=12, weight='bold')
+            ax.set_xlabel('Hour', fontsize=11)
+            ax.set_ylabel(config['ylabel'], fontsize=11, color='black')
+            ax.tick_params(axis='y', labelcolor='black', labelsize=10)
+            ax.tick_params(axis='x', labelsize=10)
+            ax.grid(True, axis='y', alpha=0.3, linestyle='-', linewidth=0.5, color='gray')
+            ax.set_xticks([1, 6, 12, 18, 24])
+            ax.spines['top'].set_visible(False)
+            
+            # --- Secondary Axis: Electricity Demand (Histogram) ---
+            ax_load = ax.twinx()
+            
+            # Calculate load axis range so bars occupy 1/3 of visual height
+            load_axis_max = load_max_value * 3
+            
+            # Plot TWO histograms - one for each period
+            width = 0.4  # Width of each bar
+            hours = range(1, 25)
+            
+            for i, period in enumerate(periods):
+                offset = (i - 0.5) * width  # Offset bars so they're side-by-side
+                hourly_load = hourly_load_by_period[period]
+                
+                bars = ax_load.bar([h + offset for h in hourly_load.index], 
+                        hourly_load.values, 
+                        color=bar_colors[i], 
+                        alpha=bar_alphas[i], 
+                        width=width, 
+                        zorder=1)
+                
+                # Collect bar handles only from first plot
+                if idx == 0:
+                    all_handles.append(bars)
+                    all_labels.append(f'{period} (Load)')
+            
+            # --- Limit load axis ticks to where histogram ends ---
+            ax_load.set_ylim(0, load_axis_max)
+            
+            # Set tick locations to only show in the bottom 1/3 where data exists
+            tick_interval = load_max_value / 3
+            load_ticks = [0, tick_interval, tick_interval*2, load_max_value]
+            ax_load.set_yticks(load_ticks)
+            ax_load.set_yticklabels([f'{int(t)}' for t in load_ticks])
+            
+            # Format Load Axis
+            ax_load.set_ylabel('Electricity Demand', fontsize=11, labelpad=10)
+            ax_load.tick_params(axis='y', labelsize=10)
+            ax_load.spines['top'].set_visible(False)
+            
+            # Ensure MEF lines appear on top
+            ax.set_zorder(ax_load.get_zorder() + 1)
+            ax.patch.set_visible(False)
+
+        # --- Create single centered legend below both plots with LARGER markers ---
+            fig.legend(all_handles, all_labels, 
+                loc='lower center',
+                bbox_to_anchor=(0.5, -0.05),
+                ncol=2, 
+                frameon=True,
+                fontsize=11,
+                edgecolor='black',
+                fancybox=False,
+                markerscale=2.0,  # Makes markers bigger
+                handlelength=3.0,  # Makes lines longer
+                handleheight=1.5,  # Makes legend entries TALLER
+                borderpad=1.0,  # More padding inside legend box
+                labelspacing=0.8)  # More vertical space between entries
+        
+        plt.tight_layout()
+        plt.subplots_adjust(bottom=0.15)  # More room for larger legend
+        plt.show()
 
 if __name__ == "__main__":
     # 1. Setup
