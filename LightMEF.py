@@ -3,15 +3,18 @@ US MEF (Marginal Emission Factor) Analysis with Markov Switching
 Methodology: Dummy Variable Seasonality Extraction (Kapoor et al., 2023 adapted)
 """
 
+import multiprocessing
 from tracemalloc import start
 import pandas as pd
 import numpy as np
 import matplotlib.pyplot as plt
 from scipy import io
 import seaborn as sns
+from scipy.stats import norm
 from datetime import datetime
 import matplotlib as mpl
 import warnings
+from scipy.stats import chi2
 
 from sympy import beta
 warnings.filterwarnings('ignore')
@@ -40,7 +43,7 @@ class LightMEF:
         self.low_regime = None
         
     # ==================== STYLE SETTINGS ====================
-    
+   
     def set_publication_style(self, use_latex=False):
         """
         Apply a publication-quality Matplotlib style.
@@ -123,7 +126,7 @@ class LightMEF:
         })
 
     # ==================== DATA LOADING ====================
-    
+   
     def load_and_clean_data(self, start_date='2019-01-01', end_date='2023-01-01'):
         """Load and clean hourly dataset"""
         print("📂 Loading data...")
@@ -153,7 +156,9 @@ class LightMEF:
             'CO2 Emissions Generated': 'hourly_emissions',
             'CO2 Emissions Intensity for Generated Electricity': 'CO2EmissionsIntensity',
             'RNG': 'hourly_generation_renewables',
-            'NRNG': 'hourly_generation_nonrenewables'
+            'NRNG': 'hourly_generation_nonrenewables',
+            'NG: COL': 'Gen_Coal',
+            'NG: NG': 'Gen_Gas'
         }
         df = df.rename(columns=rename_map)
         
@@ -172,7 +177,8 @@ class LightMEF:
             'bid_offer_date', 'interval', 'date_hour', 
             'D', 'NG','Local_Hour',
             'hourly_generation','hourly_generation_renewables','hourly_generation_nonrenewables', 'hourly_emissions',  
-            'hourly_emissions_mlb', 'hourly_generation_mkwh','hourly_generation_renewables_mkwh','hourly_generation_nonrenewables_mkwh'
+            'hourly_emissions_mlb', 'hourly_generation_mkwh','hourly_generation_renewables_mkwh','hourly_generation_nonrenewables_mkwh',
+            'Gen_Coal', 'Gen_Gas'
         ]
         
         self.data = df[[col for col in keep_cols if col in df.columns]].copy()
@@ -251,6 +257,189 @@ class LightMEF:
     
     # ==================== MARKOV SWITCHING MODEL ====================
     
+    def test_optimal_selection(self, max_iter=1000, search_reps=20): 
+        """
+        Grid search for optimal Markov Switching Model parameters based on AIC/BIC.
+        Iterates over:
+          - k_regimes: [2, 3]
+          - order: [1, 2, 3]
+          - switching_variance: [True, False]
+        """
+        if 'hourly_emissions_detrended' not in self.data.columns:
+            raise ValueError("❌ Run dummy_variable_seasonality_extraction() first!")
+        
+        print("\n🔄 Running Optimal Selection Grid Search...")
+        subset = self.data.copy().reset_index(drop=True)
+        
+        # Scale variables
+        scaler_y = StandardScaler()
+        scaler_x = StandardScaler()
+        
+        y_scaled = scaler_y.fit_transform(subset[['hourly_emissions_detrended']])
+
+        X_unscaled = subset[['hourly_generation_renewables_detrended', 'hourly_generation_nonrenewables_detrended']]
+        X_scaled = scaler_x.fit_transform(X_unscaled)
+        
+        # Storage for results
+        results_list = []
+        
+        # Grid Search Loops
+        # k_regimes: 2 to 3
+        # order: 1 to 3
+        # switching_variance: True or False
+        param_combinations = [
+            (k, p, var) 
+            for k in [2] 
+            for p in [x for x in range(5)] 
+            for var in [False]
+        ]
+        
+        total_runs = len(param_combinations)
+        
+        for i, (k, p, var) in enumerate(param_combinations, 1):
+            print(f"  > Fitting Model {i}/{total_runs}: k={k}, order={p}, switch_var={var}")
+            
+            try:
+                ms_model = MarkovAutoregression(
+                    endog=y_scaled,
+                    exog=X_scaled,
+                    k_regimes=k,
+                    order=p,
+                    trend='c',
+                    switching_trend=True,
+                    switching_exog=[True, True], # Assumes 2 exog columns
+                    switching_variance=var
+                )
+            
+                ms_results = ms_model.fit(maxiter=max_iter, search_reps=search_reps, disp=False)
+                
+                results_list.append({
+                    'k_regimes': k,
+                    'order': p,
+                    'switching_variance': var,
+                    'Log_Likelihood': ms_results.llf,
+                    'AIC': ms_results.aic,
+                    'BIC': ms_results.bic,
+                    'Converged': ms_results.mle_retvals['converged']
+                })
+            except Exception as e:
+                print(f"Model failed for k={k}, order={p}, var={var}. Error: {e}")
+                results_list.append({
+                    'k_regimes': k,
+                    'order': p,
+                    'switching_variance': var,
+                    'Log_Likelihood': None,
+                    'AIC': None,
+                    'BIC': None,
+                    'Converged': False
+                })
+
+        # Create Summary DataFrame
+        summary_df = pd.DataFrame(results_list)
+        
+        # Sort by BIC (ascending) to highlight the best model
+        summary_df.sort_values(by='BIC', ascending=True, inplace=True)
+        
+        print("\n✅ Grid Search Complete. Top 3 Models by BIC:")
+        print(summary_df.head(3))
+        
+        return summary_df
+    
+    def freq_state(self, max_iter=1000, search_reps=20,k=3):
+        if 'hourly_emissions_detrended' not in self.data.columns:
+            raise ValueError("❌ Run dummy_variable_seasonality_extraction() first!")
+        
+        print("\n🔄 Fitting Markov Switching Model...")
+        subset = self.data.copy().reset_index(drop=True)
+        
+        # Scale variables
+        scaler_y = StandardScaler()
+        scaler_x = StandardScaler()
+        
+        y_scaled = scaler_y.fit_transform(subset[['hourly_emissions_detrended']])
+
+        X_unscaled = subset[['hourly_generation_renewables_detrended', 'hourly_generation_nonrenewables_detrended']]
+        X_scaled = scaler_x.fit_transform(X_unscaled)
+        
+     
+        ms_model = MarkovAutoregression(
+            endog=y_scaled,
+            exog=X_scaled,
+            k_regimes=k,
+            order=1,
+            trend='c',
+            switching_trend=True,
+            switching_exog= [True, True],
+            switching_variance=False
+        )
+        
+        ms_results = ms_model.fit(maxiter=max_iter, search_reps=search_reps, disp=False)
+        h_prob = ms_results.smoothed_marginal_probabilities
+        # Convert to DataFrame for easier handling
+        probs = pd.DataFrame(h_prob, columns=['Regime 0', 'Regime 1', 'Regime 2'])
+
+        # Assign regimes (Highest probability wins)
+        regime_assign = probs.idxmax(axis=1)
+
+        # --- 2. DIAGNOSTICS (Your existing logic) ---
+        print("--- DIAGNOSTICS ---\n")
+
+        print("1. REGIME FREQUENCY:")
+        freq = regime_assign.value_counts(normalize=True).sort_index() * 100
+        for regime, pct in freq.items():
+            print(f"   {regime}: {pct:.1f}%")
+
+        if len(freq) < 3:
+            print(f"   ⚠️ WARNING: Only {len(freq)} regimes were assigned. Some regimes have 0% frequency.")
+            min_freq = 0.0
+        else:
+            min_freq = freq.min()
+        status = "✅ PASS" if min_freq > 10 else "❌ FAIL (outlier regime detected)"
+        print(f"   Min frequency: {min_freq:.1f}% {status}\n")
+
+        print("2. PROBABILITY SEPARATION:")
+        max_probs = probs.max(axis=1)
+        mean_max = max_probs.mean()
+        pct_above_70 = (max_probs > 0.7).mean() * 100
+        print(f"   Mean max probability: {mean_max:.3f}")
+        print(f"   % hours with P>0.7: {pct_above_70:.1f}%")
+        status = "✅ PASS" if mean_max > 0.75 else "❌ FAIL (uncertain)"
+        print(f"   Status: {status}\n")
+
+        print("3. REGIME PERSISTENCE (Transition Matrix):")
+        trans = pd.crosstab(regime_assign.shift(1), regime_assign, normalize='index')
+        print(trans.round(3))
+        print("\n")
+
+        # --- 4. VISUALIZATION (UPDATED: 3 Separate Plots) ---
+        # Create 3 subplots sharing the x-axis
+        fig, axes = plt.subplots(3, 1, figsize=(12, 10), sharex=True)
+
+        # Plot Regime 0
+        axes[0].plot(probs.index, probs['Regime 0'], color='tab:blue', linewidth=1.5)
+        axes[0].set_title('Regime 0 Smoothed Probability', fontsize=12, fontweight='bold')
+        axes[0].set_ylabel('Probability')
+        axes[0].grid(True, alpha=0.3)
+        axes[0].set_ylim(-0.05, 1.05) # Fix y-axis to 0-1
+
+        # Plot Regime 1
+        axes[1].plot(probs.index, probs['Regime 1'], color='tab:orange', linewidth=1.5)
+        axes[1].set_title('Regime 1 Smoothed Probability', fontsize=12, fontweight='bold')
+        axes[1].set_ylabel('Probability')
+        axes[1].grid(True, alpha=0.3)
+        axes[1].set_ylim(-0.05, 1.05)
+
+        # Plot Regime 2
+        axes[2].plot(probs.index, probs['Regime 2'], color='tab:green', linewidth=1.5)
+        axes[2].set_title('Regime 2 Smoothed Probability', fontsize=12, fontweight='bold')
+        axes[2].set_ylabel('Probability')
+        axes[2].set_xlabel('Time Step (Index)')
+        axes[2].grid(True, alpha=0.3)
+        axes[2].set_ylim(-0.05, 1.05)
+
+        plt.tight_layout()
+        plt.show()
+            
     def fit_msm_full_series(self, max_iter=1000, search_reps=20):
         """
         Fit Markov Switching Model on the de-seasonalized data.
@@ -287,10 +476,7 @@ class LightMEF:
         self.ms_results = ms_results
         self.scaler_y = scaler_y
         self.scaler_x = scaler_x
-        
         # Identify High MEF Regime
-        # (Assuming NonRen coefficient is higher in High MEF regime)
-
         # Get scaled params
         p = ms_results.params
         print(p)
@@ -318,7 +504,7 @@ class LightMEF:
         else:
             prob_high = raw_probs[:, self.high_regime]
         
-        # Align with data (AR(1) drops first observation)
+        # Align with data (AR(p) drops first observation)
         df = self.data.iloc[1:].copy().reset_index(drop=True)
         df['prob_high_regime'] = prob_high
         df['regime'] = (prob_high >= 0.5).astype(int)
@@ -326,7 +512,7 @@ class LightMEF:
         
         self.data_with_regimes = df
         return df
-    
+
     # ==================== ANALYSIS & PLOTTING ====================
     
     def analyze_regime_by_time(self):
@@ -350,16 +536,16 @@ class LightMEF:
         df = self.data
         
         # 1. Emissions
-        axes[0].plot(df['date_hour'], df['hourly_emissions_mlb'], color='gray', alpha=0.6, label='Original')
-        axes[0].plot(df['date_hour'], df['hourly_emissions_detrended'], color='darkred', lw=1, label='De-seasonalized (Dummy Method)')
-        axes[0].set_title('Emissions: Original vs. De-seasonalized')
-        axes[0].legend()
+        axes[0].plot(df['date_hour'], df['hourly_emissions_mlb'], color='#d62728', alpha=0.6)
+        #axes[0].plot(df['date_hour'], df['hourly_emissions_detrended'], color='darkred', lw=1, label='De-seasonalized (Dummy Method)')
+        axes[0].set_ylabel(r'Emissions (lbs $CO_2$)')
+ 
         
         # 2. Non-Ren Generation
-        axes[1].plot(df['date_hour'], df['hourly_generation_nonrenewables_mkwh'], color='gray', alpha=0.6, label='Original')
-        axes[1].plot(df['date_hour'], df['hourly_generation_nonrenewables_detrended'], color='darkblue', lw=1, label='De-seasonalized')
-        axes[1].set_title('Non-Renewable Gen: Original vs. De-seasonalized')
-        axes[1].legend()
+        axes[1].plot(df['date_hour'], df['hourly_generation_nonrenewables_mkwh'], color='#1f77b4', alpha=0.6)
+        #axes[1].plot(df['date_hour'], df['hourly_generation_nonrenewables_detrended'], color='darkblue', lw=1, label='De-seasonalized')
+        axes[1].set_ylabel('Non-Renewable Generation MKWh')
+       
         
         plt.tight_layout()
         if save_path: plt.savefig(save_path + "/time_series_comparison.png")
@@ -482,7 +668,98 @@ class LightMEF:
         if save_path: plt.savefig(save_path + "/regime_wind_rose.png")
         plt.show()
 
+    # ==================== REGIME MARGIN ANALYSIS ====================
+    def analyze_marginal_fuel_probability(self, save_path=None):
+        """
+        Calculates the 'Marginal Fuel Probability' by regressing Fuel Gen on Total Load.
+        Formula: Gen_Fuel = alpha + beta * Load + epsilon
+        The beta coefficient represents the share of the marginal MW provided by that fuel.
+        """
+        if self.data_with_regimes is None:
+            raise ValueError("❌ Run assign_regimes_to_data() first!")
+            
+        print("\n📈 MARGINAL FUEL PROBABILITY ANALYSIS (Slope of Gen vs Load)")
+        print("-" * 60)
+        
+        df = self.data_with_regimes.copy()
+        
+        # Calculate Deltas (First Differences)
+        cols_to_diff = ['D', 'Gen_Coal', 'Gen_Gas']
+        df_diff = df[cols_to_diff].diff().dropna()
+        # Re-attach regime (aligned index)
+        df_diff['regime_label'] = df.loc[df_diff.index, 'regime_label']
+        
+        results = []
+        
+        # Loop through Regimes
+        for label in ['Low MEF', 'High MEF']:
+            subset = df_diff[df_diff['regime_label'] == label]
+            
+            row = {'Regime': label}
+            
+            # Regress Coal on Load
+            model_coal = ols("Gen_Coal ~ D", data=subset).fit()
+            row['Coal_Beta'] = model_coal.params['D']
+            row['Coal_R2'] = model_coal.rsquared
+            
+            # Regress Gas on Load
+            model_gas = ols("Gen_Gas ~ D", data=subset).fit()
+            row['Gas_Beta'] = model_gas.params['D']
+            row['Gas_R2'] = model_gas.rsquared
+            
+            results.append(row)
+            
+        res_df = pd.DataFrame(results).set_index('Regime')
+        print(res_df)
+        print("-" * 60)
+        
+        # --- VISUALIZATION (UPDATED FOR VISIBILITY) ---
+        self.set_publication_style()
+        
+        # Increased figure size for better spacing
+        fig, ax = plt.subplots(figsize=(10, 7))
+        
+        # Plotting the Betas (Marginal Contribution)
+        x = np.arange(len(res_df))
+        width = 0.35
+        
+        rects1 = ax.bar(x - width/2, res_df['Coal_Beta'], width, label='Coal', color='#555555')
+        rects2 = ax.bar(x + width/2, res_df['Gas_Beta'], width, label='Gas', color='#1f77b4')
+        
+        # --- BIGGER LABELS & TICKS ---
+        ax.set_ylabel('Marginal Probability', fontsize=20)
+    
+        # X-Axis Ticks
+        ax.set_xticks(x)
+        ax.set_xticklabels(res_df.index,fontsize=20)
+        
+        # Y-Axis Ticks (Make numbers bigger)
+        ax.tick_params(axis='y', labelsize=18)
+        ax.tick_params(axis='x', labelsize=18)
+        # Legend
+        ax.legend(fontsize=20, loc='upper left', ncol=1)
+      
 
+        
+        ax.axhline(0, color='black', linewidth=0.8)
+        
+        # Add value labels (Bigger and Bold)
+        def autolabel(rects):
+            for rect in rects:
+                height = rect.get_height()
+                ax.annotate(f'{height:.2f}',
+                            xy=(rect.get_x() + rect.get_width() / 2, height),
+                            xytext=(0, 5), textcoords="offset points",
+                            ha='center', va='bottom',
+                            fontsize=18, fontweight='bold') # <-- Increased size
+        
+        autolabel(rects1)
+        autolabel(rects2)
+        
+        plt.tight_layout()
+        if save_path: plt.savefig(save_path + "/marginal_fuel_probability.png")
+        plt.show()
+        
     # ==================== Hourly MSM  Parallel ====================
     def fit_msm_hourly(self, max_iter=1000, search_reps=20, n_jobs=-1):
         """
@@ -496,8 +773,8 @@ class LightMEF:
         subset = self.data.copy().reset_index(drop=True)
         
         # Split into periods
-        year_first_period = [2019, 2020, 2021, 2022]
-        year_second_period = [2023, 2024, 2025]
+        year_first_period = [2019, 2020, 2021]
+        year_second_period = [2022,2023, 2024, 2025]
         subset_1 = subset[subset['year'].isin(year_first_period)].copy()
         subset_2 = subset[subset['year'].isin(year_second_period)].copy()
         
@@ -517,7 +794,7 @@ class LightMEF:
         
         # Create tasks for parallel processing
         tasks = []
-        for subset_df, period in [(subset_1, '2019-2022'), (subset_2, '2023-2025')]:
+        for subset_df, period in [(subset_1, '2019-2021'), (subset_2, '2022-2025')]:
             for hour in range(1, 25):
                 tasks.append((subset_df, period, hour, max_iter, search_reps))
         
@@ -538,7 +815,7 @@ class LightMEF:
         return pd.DataFrame(ms_results_year)
 
     def _fit_single_msm(self, subset_df, period, hour, max_iter, search_reps):
-        """Helper function to fit a single MSM model for one hour."""
+        """ Helper function to fit a single MSM model for one hour """
         subset_hour = subset_df[subset_df['Local_Hour'] == hour]
         # Calculate average load
         average_load = subset_hour['D'].mean()
@@ -656,11 +933,11 @@ class LightMEF:
             ax.set_ylim(MEF_MIN, MEF_MAX)
 
             # Format Primary Axis
-            ax.set_title(config['title'], fontsize=13, pad=12, weight='bold')
-            ax.set_xlabel('Hour', fontsize=11)
-            ax.set_ylabel(config['ylabel'], fontsize=11, color='black')
-            ax.tick_params(axis='y', labelcolor='black', labelsize=10)
-            ax.tick_params(axis='x', labelsize=10)
+            ax.set_title(config['title'], fontsize=18, pad=12, weight='bold')
+            ax.set_xlabel('Hour', fontsize=16)
+            ax.set_ylabel(config['ylabel'], fontsize=16, color='black')
+            ax.tick_params(axis='y', labelcolor='black', labelsize=14)
+            ax.tick_params(axis='x', labelsize=14)
             ax.grid(True, axis='y', alpha=0.3, linestyle='-', linewidth=0.5, color='gray')
             ax.set_xticks([1, 6, 12, 18, 24])
             ax.spines['top'].set_visible(False)
@@ -701,8 +978,8 @@ class LightMEF:
             ax_load.set_yticklabels([f'{int(t)}' for t in load_ticks])
             
             # Format Load Axis
-            ax_load.set_ylabel('Electricity Demand', fontsize=11, labelpad=10)
-            ax_load.tick_params(axis='y', labelsize=10)
+            ax_load.set_ylabel('Electricity Demand', fontsize=16, labelpad=10)
+            ax_load.tick_params(axis='y', labelsize=14)
             ax_load.spines['top'].set_visible(False)
             
             # Ensure MEF lines appear on top
@@ -712,10 +989,10 @@ class LightMEF:
         # --- Create single centered legend below both plots with LARGER markers ---
             fig.legend(all_handles, all_labels, 
                 loc='lower center',
-                bbox_to_anchor=(0.5, -0.05),
+                bbox_to_anchor=(0.5, -0.1),
                 ncol=2, 
                 frameon=True,
-                fontsize=11,
+                fontsize=14,
                 edgecolor='black',
                 fancybox=False,
                 markerscale=2.0,  # Makes markers bigger

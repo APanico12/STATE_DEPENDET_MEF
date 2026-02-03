@@ -6,6 +6,9 @@ Covered Years: 2019-2022
 Approach: Intra-day and inter-day
 """
 
+import re
+from unittest import result
+from Cython import p_const_ptrdiff_t
 import pandas as pd
 import numpy as np
 import matplotlib.pyplot as plt
@@ -59,12 +62,12 @@ class USMEFAnalysis:
         font_params = {
             'font.family': 'sans-serif',
             'font.sans-serif': ['Helvetica', 'Arial', 'DejaVu Sans'],
-            'font.size': 7,
-            'axes.titlesize': 8,
-            'axes.labelsize': 7,
-            'xtick.labelsize': 6,
-            'ytick.labelsize': 6,
-            'legend.fontsize': 6,
+            'font.size': 14,
+            'axes.titlesize': 18,
+            'axes.labelsize': 16,
+            'xtick.labelsize': 12,
+            'ytick.labelsize': 12,
+            'legend.fontsize': 14,
             'mathtext.fontset': 'stixsans',  # Sans-serif math look
         }
 
@@ -121,7 +124,7 @@ class USMEFAnalysis:
             'lines.markersize': 4,
             'axes.prop_cycle': plt.cycler('color', cb_palette),
         })
-
+        
     @staticmethod
     def get_figsize(width_mm, ratio=0.618):
         """
@@ -173,7 +176,7 @@ class USMEFAnalysis:
         # --- Select final columns  ---
         keep_cols = [
             'bid_offer_date', 'interval', 'date_hour', 
-            'D', 'NG',
+            'D', 'NG','Gen_Gas','Gen_Coal',
             'hourly_generation','hourly_generation_renewables','hourly_generation_nonrenewables', 'hourly_emissions', 
             'CO2EmissionsIntensity', 
             'hourly_emissions_mlb', 'hourly_generation_mkwh','hourly_generation_renewables_mkwh','hourly_generation_nonrenewables_mkwh'
@@ -268,7 +271,7 @@ class USMEFAnalysis:
         ).fit()
         print(model_em.summary())
         # Deseasoned & detrended emissions
-        df['hourly_emissions_res_2'] = model_em.resid + model_em.params['Intercept']
+        df['hourly_emissions_res'] = model_em.resid + model_em.params['Intercept']
 
         # ---- Generation model ----
         # Equivalent to R:
@@ -279,7 +282,7 @@ class USMEFAnalysis:
         ).fit()
         print(model_gen.summary())
         # Deseasoned & detrended generation
-        df['hourly_generation_res_2'] = model_gen.resid + model_gen.params['Intercept']
+        df['hourly_generation_res'] = model_gen.resid + model_gen.params['Intercept']
         
         #same for hourly_generation_renewables
         model_gen_r = ols(
@@ -288,7 +291,7 @@ class USMEFAnalysis:
         ).fit()
         print(model_gen_r.summary())
         # Deseasoned & detrended renewable generation
-        df['hourly_generation_renewables_res_2'] = model_gen_r.resid + model_gen_r.params['Intercept']
+        df['hourly_generation_renewables_res'] = model_gen_r.resid + model_gen_r.params['Intercept']
         
         #same for hourly_generation_nonrenewables
         model_gen_nr = ols(
@@ -296,7 +299,7 @@ class USMEFAnalysis:
             data=df
         ).fit()
         # Deseasoned & detrended non-renewable generation
-        df['hourly_generation_nonrenewables_res_2'] = model_gen_nr.resid + model_gen_nr.params['Intercept']
+        df['hourly_generation_nonrenewables_res'] = model_gen_nr.resid + model_gen_nr.params['Intercept']
         print(model_gen_nr.summary())
         
         # ---- Save results ----
@@ -401,20 +404,20 @@ class USMEFAnalysis:
         
         df = self.data
         self.set_publication_style()
-        fig, axes = plt.subplots(2, 1, figsize=self.get_figsize(89*2))
+        fig, axes = plt.subplots(2, 1, figsize=(10,8))
        
         # Emissions
-        axes[0].plot(df['date_hour'], df['hourly_emissions'], 
+        axes[0].plot(df['date_hour'], df['hourly_emissions_mlb'], 
                     linewidth=0.3, alpha=0.7, color='darkred')
-        axes[0].set_title('Hourly Emissions (2019-2022)', 
+        axes[0].set_title('Hourly Emissions (2019-2025)', 
                          fontsize=16, fontweight='bold')
-        axes[0].set_ylabel('Emissions (metric tons CO₂)', fontsize=13)
+        axes[0].set_ylabel(r'Emissions (mlbs $CO_2$)', fontsize=13)
         axes[0].grid(True, alpha=0.3)
         
         # Generation
-        axes[1].plot(df['date_hour'], df['hourly_generation'],
+        axes[1].plot(df['date_hour'], df['hourly_generation_mkwh'],
                     linewidth=0.3, alpha=0.7, color='darkblue')
-        axes[1].set_title('Hourly Generation (2019-2022)', 
+        axes[1].set_title('Hourly Generation (2019-2025)', 
                          fontsize=16, fontweight='bold')
         axes[1].set_ylabel('Generation (MWh)', fontsize=13)
         axes[1].set_xlabel('Date', fontsize=13)
@@ -460,10 +463,10 @@ class USMEFAnalysis:
         plt.show()
         return fig    
     
-    def plot_annual_diagnostics_dynamic(self, lags=100, save_path=None):
+    def plot_annual_diagnostics_dynamic(self, lags=100, save_path='images'):
         """
-        Dynamic version: Recalculates residuals each year using regression
-        similar to the R script.
+        Dynamic version: Recalculates residuals each year.
+        Generates 3 separate SQUARE plots per variable: Residuals, ACF, and PACF.
         """
         if self.data is None:
             raise ValueError("No data loaded. Run load_and_clean_data() first.")
@@ -475,62 +478,82 @@ class USMEFAnalysis:
         years = sorted(df['year'].unique())
         print(f"🧭 Found {len(years)} years: {years}")
 
+        # Define Square Size (e.g., 6x6 inches)
+        sq_size = (6, 6)
+
         for year in years:
             print(f"\n📅 Processing {year}...")
             df_year = df[df['year'] == year].copy()
 
-            # Recalculate hourly generation residuals
+            # 1. Recalculate residuals
             model_gen = ols("hourly_generation ~ factorinterval * factormonth + factordow + trend", data=df_year).fit()
             df_year['hourly_generation_res'] = model_gen.resid + model_gen.params[0]
 
-            # Recalculate hourly emissions residuals
             model_em = ols("hourly_emissions ~ factorinterval * factormonth + factordow + trend", data=df_year).fit()
             df_year['hourly_emissions_res'] = model_em.resid + model_em.params[0]
 
-            # --- Plot generation residuals ---
-            self.elegant_plot(
-                df_year['date_hourx'], df_year['hourly_generation_res'],
-                f"Hourly Load – Deseasoned & Detrended ({year})",
-                "Hourly load (MWh)", save_path=save_path
-            )
-
-            # --- ACF/PACF for generation ---
-            fig, ax = plt.subplots(2, 1, figsize=self.get_figsize(89 * 2))
-            plot_acf(df_year['hourly_generation_res'].dropna(), lags=lags, ax=ax[0], color="#1f77b4", zero=False)
-            plot_pacf(df_year['hourly_generation_res'].dropna(), lags=lags, ax=ax[1], color="#ff7f0e", zero=False, method="ywm")
-
-            for i, title in enumerate(["ACF – Hourly Load", "PACF – Hourly Load"]):
-                ax[i].set_title(f"{title} ({year})", loc='left', pad=10, weight='bold')
-                ax[i].set_ylim(-1.05, 1.05)
-                ax[i].spines[['top', 'right']].set_visible(False)
-                ax[i].grid(True, alpha=0.3)
-
-            fig.tight_layout()
-            if save_path:
-                fig.savefig(f"{save_path}/ACF_PACF_Load_{year}.png", dpi=300, bbox_inches='tight')
+            # ==========================================
+            # VARIABLE 1: GENERATION
+            # ==========================================
+            
+            # Plot 1: Residuals Time Series
+            fig1, ax1 = plt.subplots(figsize=sq_size)
+            ax1.plot(df_year['date_hourx'], df_year['hourly_generation_res']/1000, color='black', linewidth=0.8)
+            ax1.set_title(f"Generation Residuals ({year})")
+            ax1.set_ylabel("GWh")
+            ax1.grid(True, alpha=0.3)
+            plt.tight_layout()
+            if save_path: fig1.savefig(f"{save_path}/Generation_Res_{year}.pdf", bbox_inches='tight')
             plt.show()
 
-            # --- Plot emissions residuals ---
-            self.elegant_plot(
-                df_year['date_hourx'], df_year['hourly_emissions_res'],
-                f"Hourly Emissions – Deseasoned & Detrended ({year})",
-                "Hourly emissions (metric tons CO₂)", save_path=save_path
-            )
+            # Plot 2: ACF
+            fig2, ax2 = plt.subplots(figsize=sq_size)
+            plot_acf(df_year['hourly_generation_res'].dropna(), lags=lags, ax=ax2, color="#1f77b4", zero=False, title=f"ACF Generation ({year})")
+            ax2.set_ylim(-1.05, 1.05)
+            ax2.grid(True, alpha=0.3)
+            plt.tight_layout()
+            if save_path: fig2.savefig(f"{save_path}/Generation_ACF_{year}.pdf", bbox_inches='tight')
+            plt.show()
 
-            # --- ACF/PACF for emissions ---
-            fig, ax = plt.subplots(2, 1, figsize=self.get_figsize(89 * 2))
-            plot_acf(df_year['hourly_emissions_res'].dropna(), lags=lags, ax=ax[0], color="#1f77b4", zero=False)
-            plot_pacf(df_year['hourly_emissions_res'].dropna(), lags=lags, ax=ax[1], color="#ff7f0e", zero=False, method="ywm")
+            # Plot 3: PACF
+            fig3, ax3 = plt.subplots(figsize=sq_size)
+            plot_pacf(df_year['hourly_generation_res'].dropna(), lags=lags, ax=ax3, color="#ff7f0e", zero=False, method="ywm", title=f"PACF Generation ({year})")
+            ax3.set_ylim(-1.05, 1.05)
+            ax3.grid(True, alpha=0.3)
+            plt.tight_layout()
+            if save_path: fig3.savefig(f"{save_path}/Generation_PACF_{year}.pdf", bbox_inches='tight')
+            plt.show()
 
-            for i, title in enumerate(["ACF – Hourly Emissions", "PACF – Hourly Emissions"]):
-                ax[i].set_title(f"{title} ({year})", loc='left', pad=10, weight='bold')
-                ax[i].set_ylim(-1.05, 1.05)
-                ax[i].spines[['top', 'right']].set_visible(False)
-                ax[i].grid(True, alpha=0.3)
+            # ==========================================
+            # VARIABLE 2: EMISSIONS
+            # ==========================================
 
-            fig.tight_layout()
-            if save_path:
-                fig.savefig(f"{save_path}/ACF_PACF_Emissions_{year}.png", dpi=300, bbox_inches='tight')
+            # Plot 1: Residuals Time Series
+            fig4, ax4 = plt.subplots(figsize=sq_size)
+            ax4.plot(df_year['date_hourx'], df_year['hourly_emissions_res']/1000, color='black', linewidth=0.8)
+            ax4.set_title(f"Emissions Residuals ({year})")
+            ax4.set_ylabel(r"Tons CO2 $10^3$")
+            ax4.grid(True, alpha=0.3)
+            plt.tight_layout()
+            if save_path: fig4.savefig(f"{save_path}/Emissions_Res_{year}.pdf", bbox_inches='tight')
+            plt.show()
+
+            # Plot 2: ACF
+            fig5, ax5 = plt.subplots(figsize=sq_size)
+            plot_acf(df_year['hourly_emissions_res'].dropna(), lags=lags, ax=ax5, color="#1f77b4", zero=False, title=f"ACF Emissions ({year})")
+            ax5.set_ylim(-1.05, 1.05)
+            ax5.grid(True, alpha=0.3)
+            plt.tight_layout()
+            if save_path: fig5.savefig(f"{save_path}/Emissions_ACF_{year}.pdf", bbox_inches='tight')
+            plt.show()
+
+            # Plot 3: PACF
+            fig6, ax6 = plt.subplots(figsize=sq_size)
+            plot_pacf(df_year['hourly_emissions_res'].dropna(), lags=lags, ax=ax6, color="#ff7f0e", zero=False, method="ywm", title=f"PACF Emissions ({year})")
+            ax6.set_ylim(-1.05, 1.05)
+            ax6.grid(True, alpha=0.3)
+            plt.tight_layout()
+            if save_path: fig6.savefig(f"{save_path}/Emissions_PACF_{year}.pdf", bbox_inches='tight')
             plt.show()
     
     def plot_annual_diagnostics_dynamic_linear(self, lags=100, save_path=None):
@@ -605,7 +628,6 @@ class USMEFAnalysis:
             if save_path:
                 fig.savefig(f"{save_path}/ACF_PACF_Emissions_{year}.png", dpi=300, bbox_inches='tight')
             plt.show()    
-    
         
     def plot_seasonal_diagnostics_dynamic(self, lags=100, save_path=None):
         """
@@ -689,18 +711,73 @@ class USMEFAnalysis:
                 fig.savefig(f"{save_path}/ACF_PACF_Emissions_{season}.png", dpi=300, bbox_inches='tight')
             plt.show()
             print("\n✅ Seasonal diagnostics (dynamic residuals) completed.")
-    
         
-    def run_nonlinearity_tests_r(self, 
-                             y_col="hourly_emissions_res", 
-                             group_col="year",
-                             save_path=None,
-                             file_prefix="nonlinear_test"):
-        """
-        Run unit root, stationarity, and nonlinearity tests using R (via rpy2),
-        refitting the deseasonalization model per group (year or season).
-        """
+    def run_uniroot_tests(self,
+                            y_col="hourly_emissions", 
+                            group_col="year"):
+        
+        from statsmodels.tsa.stattools import adfuller
+        from statsmodels.formula.api import ols
+        from arch.unitroot import  PhillipsPerron, KPSS
+        
+        df = self.data.copy()
+        groups = sorted(df[group_col].unique())
+        
+        results_all = []
+        
+        for group in groups:
+            # 1. Prepare Data
+            subset = df[df[group_col] == group].copy()
+            
+            # Refit Deseasonalization (OLS)
+           
+            model = ols(f"{y_col} ~ factorinterval * factormonth + factordow + trend", data=subset).fit()
+            # Restore the intercept to center data around the mean (standard practice)
+            y_resid = model.resid + model.params[0]
+            y = y_resid.to_numpy()
+            
+            # 2. Unit Root Tests
+            dftest = adfuller(y, autolag="BIC")
+            KPSStest = KPSS(y)
+            pptest = PhillipsPerron(y)
+            results = {
+                'group_col': group,   
+                "ADF_stat": dftest[0],
+                "ADF_pval": dftest[1],
+                "ADF_lag": dftest[2],
+                "ADF_crit_1": dftest[4]['1%'],
+                "ADF_crit_5": dftest[4]['5%'],
+                "ADF_crit_10": dftest[4]['10%'],
+                "KPSS_stat": KPSStest.stat,
+                "KPSS_pval": KPSStest.pvalue,
+                "KPSS_lag": KPSStest.lags,
+                "KPSS_crit_10": KPSStest.critical_values['10%'],
+                "KPSS_crit_5": KPSStest.critical_values['5%'],
+                "KPSS_crit_1": KPSStest.critical_values['1%'],
+                "PP_stat": pptest.stat,
+                "PP_pval": pptest.pvalue,
+                "PP_lag": pptest.lags,
+                "PP_crit_1": pptest.critical_values['1%'],  
+                "PP_crit_5": pptest.critical_values['5%'],
+                "PP_crit_10": pptest.critical_values['10%']
+            }
 
+            results_all.append(results)
+
+        # Convert to DataFrame
+        df_results = pd.DataFrame(results_all)
+        
+        return df_results
+
+    def run_nonlinearity_tests_r(self, 
+                                 y_col="hourly_emissions", 
+                                 group_col="year",
+                                 save_path=None,
+                                 file_prefix="nonlinear_test"):
+        """
+        Run rigorous Unit Root and Nonlinearity tests.
+        Uses AIC to determine the optimal lag for Nonlinearity tests.
+        """
         import pandas as pd
         import numpy as np
         import re
@@ -712,133 +789,260 @@ class USMEFAnalysis:
 
         warnings.filterwarnings("ignore")
 
-        # --- R Package Imports ---
-        try:
-            urca = importr("urca")
-            NTS = importr("NTS")
-            fNonlinear = importr("fNonlinear")
-        except Exception as e:
-            raise ImportError(f"R packages 'urca', 'NTS', 'fNonlinear' required. Error: {e}")
-
-        if self.data is None:
-            raise ValueError("No data loaded.")
-        if y_col not in self.data.columns:
-            raise ValueError(f"Column '{y_col}' not found.")
+        # Load R Packages
+        
+        NTS = importr("NTS")
+        fNonlinear = importr("fNonlinear")
+    
 
         df = self.data.copy()
         results_all = []
-
-        # Determine groups
-        groups = [None] if group_col is None else sorted(df[group_col].dropna().unique())
-        print(f"📊 Running tests for {len(groups)} group(s): {groups if group_col else '[FULL SERIES]'}")
+        
+        # Determine groups (Years)
+        groups = sorted(df[group_col].unique())
+       
 
         for group in groups:
-            # Subset the data
-            subset = df.copy() if group is None else df[df[group_col] == group].copy()
-
-            if len(subset) < 30:
-                print(f"⚠️ Skipping group '{group}': too few observations.")
-                continue
-
-            try:
-                # ✅ Refit the deseasonalization model like R: OLS per group
-                model = ols(f"{y_col} ~ factorinterval * factormonth + factordow + trend", data=subset).fit()
-                y_resid = model.resid + model.params[0]
-            except:
-                print(f"❌ Regression failed for group '{group}'. Skipping.")
-                continue
-
-            y = y_resid.dropna().to_numpy()
-
-            if np.allclose(np.std(y), 0):
-                print(f"⚠️ Skipping group '{group}': series is nearly constant.")
-                continue
-
-            # Push to R
+            # 1. Prepare Data
+            subset = df[df[group_col] == group].copy()
+            
+          
+            model = ols(f"{y_col} ~ factorinterval * factormonth + factordow + trend", data=subset).fit()
+            # Restore the intercept to center data around the mean (standard practice)
+            y_resid = model.resid + model.params[0]
+            y = y_resid.to_numpy()
+            
+            # Send to R
             globalenv["y"] = FloatVector(y)
-            row = {group_col: group} if group_col else {"group": "full_series"}
+            row = {group_col: group}
 
-            try:
-                adf = urca.ur_df(FloatVector(y), type="none", selectlags="BIC")
-                row["ADF_stat"] = float(adf.do_slot("teststat")[0])
-                row["ADF_cval"] = float(adf.do_slot("cval")[1])
-            except:
-                row["ADF_stat"] = row["ADF_cval"] = np.nan
+            # ==========================================
+            # NONLINEARITY TESTS
+            # ==========================================
+            
+            # CRITICAL STEP: Determine Optimal Lag (p) using AIC
 
+            # R's ar() function automatically selects order based on AIC
+            ar_fit = r.ar(FloatVector(y), method="mle")
+            optimal_p = int(ar_fit.rx2("order")[0])
+            
+            # Safety check: If AIC selects 0 lags (white noise), force 1 to allow tests to run
+            optimal_p = max(1, optimal_p)
+            row["Nonlinear_Lag_Used"] = optimal_p 
+            
+            # 5. Tsay's F-Test (Uses optimal_p)
             try:
-                lag = int(adf.do_slot("lags")[0]) if 'adf' in locals() else 1
-                dfgls = urca.ur_ers(FloatVector(y), lag_max=lag, model="constant")
-                row["DFGLS_stat"] = float(dfgls.do_slot("teststat")[0])
-                row["DFGLS_cval"] = float(dfgls.do_slot("cval")[1])
-            except:
-                row["DFGLS_stat"] = row["DFGLS_cval"] = np.nan
-
-            try:
-                pp = urca.ur_pp(FloatVector(y), type="Z-tau", model="constant", lags="long")
-                row["PP_stat"] = float(pp.do_slot("teststat")[0])
-                row["PP_cval"] = float(pp.do_slot("cval")[1])
-                pp_lag = int(pp.do_slot("lag")[0])
-            except:
-                row["PP_stat"] = row["PP_cval"] = np.nan
-                pp_lag = 2
-
-            try:
-                kpss = urca.ur_kpss(FloatVector(y), type="mu", lags="short")
-                row["KPSS_stat"] = float(kpss.do_slot("teststat")[0])
-                row["KPSS_cval"] = float(kpss.do_slot("cval")[1])
-            except:
-                row["KPSS_stat"] = row["KPSS_cval"] = np.nan
-
-            try:
-                ftest = NTS.F_test(FloatVector(y), pp_lag, thres=float(np.mean(y)))
-                row["F_stat"] = float(ftest.rx2("test.stat")[0])
+                ftest = NTS.F_test(FloatVector(y), optimal_p, thres=float(np.mean(y)))
+                row["F_stat"]   = float(ftest.rx2("test.stat")[0])
                 row["F_pvalue"] = float(ftest.rx2("p.value")[0])
             except:
-                row["F_stat"] = row["F_pvalue"] = np.nan
+                row["F_stat"] = np.nan
 
-            try:
-                yN = int(0.1 * len(y))
-                tnt = NTS.thr_test(FloatVector(y), p=pp_lag, d=1, ini=yN, include_mean=False)
-                stat, DF1, DF2 = float(tnt[0][0]), float(tnt[1][0]), float(tnt[1][1])
-                row["TNT_stat"] = stat
-                row["TNT_pvalue"] = 1 - f_dist.cdf(stat, DF1, DF2)
-            except:
-                row["TNT_stat"] = row["TNT_pvalue"] = np.nan
+            # 6. Threshold Nonlinearity Test (TNT) (Uses optimal_p)
+            # try:
+            #     yN = int(0.1 * len(y)) # Trim 10%
+            #     # Note: We keep d=1 (delay) as standard, but use the correct AIC 'p'
+            #     tnt = NTS.thr_test(FloatVector(y), p=optimal_p, d=1, ini=yN, include_mean=False)
+            #     stat, DF1, DF2 = float(tnt[0][0]), float(tnt[1][0]), float(tnt[1][1])
+                
+            #     row["TNT_stat"]   = stat
+            #     row["TNT_pvalue"] = 1 - f_dist.cdf(stat, DF1, DF2)
+            # except:
+            #     row["TNT_stat"] = np.nan
 
+            # 7. BDS Test (Independence)
+            # BDS does not use AR lags; it uses embedding dimension 'm'. 
+            # Standard practice is m=6 for hourly data.
             try:
                 std_val = float(np.std(y))
                 bds = fNonlinear.bdsTest(FloatVector(y), m=6, eps=2 * std_val)
                 test_obj = bds.do_slot("test")
-                row["BDS_stat"] = float(test_obj.rx2("statistic")[0])
+                
+                row["BDS_stat"]   = float(test_obj.rx2("statistic")[0])
                 row["BDS_pvalue"] = float(test_obj.rx2("p.value")[0])
+                row["BDS_dim"]    = 6 
             except:
-                row["BDS_stat"] = row["BDS_pvalue"] = np.nan
+                row["BDS_stat"] = np.nan
 
+            # 8. Peña-Rodríguez (PR) Test (Uses optimal_p)
             try:
-                pr_output = r(f'capture.output(print(PRnd(abs(y), m={pp_lag})))')
+                cmd = f'capture.output(print(PRnd(abs(y), m={optimal_p})))'
+                pr_output = r(cmd)
+                
                 if len(pr_output) >= 2:
                     tokens = re.split(r'\s+', pr_output[1].strip())
-                    if len(tokens) >= 2:
-                        row["PR_stat"] = float(tokens[-2])
-                        row["PR_pvalue"] = float(tokens[-1])
-                    else:
-                        row["PR_stat"] = row["PR_pvalue"] = np.nan
+                    row["PR_stat"]   = float(tokens[-2])
+                    row["PR_pvalue"] = float(tokens[-1])
                 else:
-                    row["PR_stat"] = row["PR_pvalue"] = np.nan
+                    row["PR_stat"] = np.nan
             except:
-                row["PR_stat"] = row["PR_pvalue"] = np.nan
+                row["PR_stat"] = np.nan
 
             results_all.append(row)
 
         df_out = pd.DataFrame(results_all)
-
         if save_path:
-            fname = f"{save_path}/{file_prefix}_{y_col}_results.xlsx"
-            df_out.to_excel(fname, index=False)
-            print(f"💾 Saved to: {fname}")
-
+            df_out.to_excel(f"{save_path}/{file_prefix}.xlsx", index=False)
+            print(f"💾 Saved results with AIC lags to: {save_path}/{file_prefix}.xlsx")
+            
         return df_out
+    
+    def compare_models_standardized(self):
+        """
+        Fits OLS, ARIMA, and MSM on STANDARDIZED data to ensure valid AIC/BIC comparison.
+        """
+        import numpy as np
+        import pandas as pd
+        import itertools
+        # Check for pmdarima
+        try:
+            import pmdarima as pm
+        except ImportError:
+            pass # We will use the manual grid search from before if this fails
+
+        from statsmodels.regression.linear_model import OLS
+        from statsmodels.tsa.arima.model import ARIMA
+        from statsmodels.tsa.regime_switching.markov_autoregression import MarkovAutoregression
+        from sklearn.preprocessing import StandardScaler
+        from patsy import dmatrices
+        import warnings
+
+        warnings.filterwarnings("ignore")
+        np.random.seed(987)
+
+        # 1. DATA PREP
+        df = self.data.copy()
+        if 'datetime' in df.columns:
+            df['datetime'] = pd.to_datetime(df['datetime'])
+            df = df.set_index('datetime').sort_index()
         
+        # 2. GLOBAL SCALING (Crucial for Comparison)
+        print("🔹 Standardizing data for valid AIC/BIC comparison...")
+        
+        y_col_raw = 'hourly_emissions_res'
+        exog_cols_raw = ['hourly_generation_renewables_res', 'hourly_generation_nonrenewables_res']
+        
+        # Scale Target (Y)
+        scaler_y = StandardScaler()
+        y_scaled = pd.Series(
+            scaler_y.fit_transform(df[[y_col_raw]]).flatten(),
+            index=df.index,
+            name='y_standardized'
+        )
+        
+        # Scale Exogenous (X)
+        scaler_x = StandardScaler()
+        X_scaled = pd.DataFrame(
+            scaler_x.fit_transform(df[exog_cols_raw]),
+            columns=exog_cols_raw,
+            index=df.index
+        )
+
+        results_list = []
+
+        def get_model_stats(model_name, model_result):
+            return {
+                "Model": model_name,
+                "AIC": round(model_result.aic, 2),
+                "BIC": round(model_result.bic, 2),
+                "Log_Likelihood": round(model_result.llf, 2)
+            }
+
+        # =========================================================
+        # MODEL 1: OLS (Standardized)
+        # =========================================================
+        try:
+            import statsmodels.api as sm
+            # Since data is already de-seasonalized, we do NOT need dummies/interactions.
+            # We simply regress Scaled Emissions on Scaled Generation + Constant.
+            
+            # 1. Add Constant to the standardized exogenous variables
+            X_ols = sm.add_constant(X_scaled)
+            
+            # 2. Safety cast to ensure float type (avoids the object error)
+            X_ols = X_ols.astype(float)
+            y_scaled_clean = y_scaled.astype(float)
+
+            # 3. Fit
+            ols_mod = OLS(y_scaled_clean, X_ols).fit()
+            results_list.append(get_model_stats("OLS (Standardized)", ols_mod))
+            
+        except Exception as e:
+            print(f"⚠️ OLS Failed: {e}")
+            
+        # =========================================================
+        # MODEL 3: AUTO-ARIMA (Optimized)
+        # =========================================================
+        try:
+            print("🔹 Running Auto-ARIMA selection (BIC)...")
+            
+            # Step A: Auto-ARIMA on emissions only (finding optimal p, d, q)
+            # We exclude exog here to find the residual structure first (common practice)
+            auto_model = pm.auto_arima(
+                y_scaled,
+                exogenous=None,       
+                information_criterion='bic',
+                seasonal=False,       # Set True if you want SARIMA
+                stepwise=True,
+                suppress_warnings=True,
+                error_action='ignore'
+            )
+            
+            # Extract orders
+            p_opt, d_opt, q_opt = auto_model.order
+            print(f"   ✅ Optimal Order Found: p={p_opt}, d={d_opt}, q={q_opt}")
+            
+            # Use the found order
+            final_order = (p_opt, d_opt, q_opt)
+            
+            # Step B: Fit the full ARIMAX model using statsmodels (with exog)
+            # We use statsmodels for the final fit to ensure consistent AIC/BIC calculation logic
+            arima_mod = ARIMA(
+                endog=y_scaled, 
+                exog=X_scaled, 
+                order=final_order
+            )
+            arima_res = arima_mod.fit()
+            
+    
+            results_list.append(get_model_stats(f"ARIMA {final_order} (Standardized)", arima_res))
+            
+        except Exception as e:
+            print(f"⚠️ ARIMA Failed: {e}")
+
+        # =========================================================
+        # MODEL 3: MS-ARX (Standardized)
+        # =========================================================
+        try:
+            print("🔹 Fitting MS-ARX on standardized data...")
+            
+            ms_mod = MarkovAutoregression(
+                endog=y_scaled, 
+                exog=X_scaled, 
+                k_regimes=2, 
+                order=1, 
+                trend='c', 
+                switching_trend=True, 
+                switching_exog=[True, True], 
+                switching_variance=False
+            )
+            ms_res = ms_mod.fit(disp=False)
+            results_list.append(get_model_stats("MS-ARX (Standardized)", ms_res))
+            
+        except Exception as e:
+            print(f" MSM Failed: {e}")
+
+        # =========================================================
+        # OUTPUT
+        # =========================================================
+        summary_df = pd.DataFrame(results_list)
+        if not summary_df.empty:
+            summary_df = summary_df.set_index('Model')
+            summary_df.sort_values(by='BIC', ascending=True, inplace=True)
+        
+        print("\n✅ Comparison Complete (All Standardized).")
+        return summary_df
+    
     def mef_estimate(self, group_col='year', include_markov=True):
             import numpy as np
             import pandas as pd
@@ -869,14 +1073,14 @@ class USMEFAnalysis:
                 # We use the same logic as your R code: remove seasonality, keep residuals + mean
                 
                 # Detrend hourly_emissions
-                y_formula = "hourly_emissions_mlb ~ C(factordow, Treatment(reference='Monday')) + C(factorinterval)*C(factormonth)"
+                y_formula = "hourly_emissions_mlb ~ C(factordow, Treatment(reference='Monday')) + C(factorinterval)*C(factormonth)+trend"
                 y_y, y_X = dmatrices(y_formula, data=subset, return_type='dataframe')
                 y_model = OLS(y_y, y_X).fit()
                 subset['em_res'] = y_model.resid + y_model.params.iloc[0] 
 
                 # Detrend generation components
                 for col in ['hourly_generation_renewables_mkwh', 'hourly_generation_nonrenewables_mkwh']:
-                    x_formula = f"{col} ~ C(factordow, Treatment(reference='Monday')) + C(factorinterval)*C(factormonth)"
+                    x_formula = f"{col} ~ C(factordow, Treatment(reference='Monday')) + C(factorinterval)*C(factormonth)+trend"
                     x_y, x_X = dmatrices(x_formula, data=subset, return_type='dataframe')
                     x_model = OLS(x_y, x_X).fit()
                     subset[col + '_res'] = x_model.resid + x_model.params.iloc[0]
@@ -948,10 +1152,10 @@ class USMEFAnalysis:
                     
                     # Extract orders
                     # auto_model.order returns (p, d, q)
-                    _, d_opt, q_opt = auto_model.order
-                    print(f"   ARIMA orders selected: d={d_opt}, q={q_opt}")
+                    p_opt, d_opt, q_opt = auto_model.order
+                    print(f"   ARIMA orders selected:p={p_opt} d={d_opt}, q={q_opt}")
                     # Step B: Force p=1 (as per R code: order = c(1,d,q))
-                    final_order = (1, d_opt, q_opt)
+                    final_order = (p_opt, d_opt, q_opt)
                     
                     # Step C: Fit the specific model with Exogenous Regressors
                     # Note: Your R code used 'hourly_generation_res'.
@@ -1011,13 +1215,11 @@ class USMEFAnalysis:
                             trend = 'c',
                             switching_trend=True,
                             switching_exog=[True, True],  # Allow slopes to switch
-                            switching_variance=False 
+                            switching_variance= False 
                         )
 
                         # E. Fit with better initialization
                         ms_results = ms_model.fit()
-                        print(ms_results.summary())
-                        
                         # F. Extract and UNSCALE coefficients
                         # Get scaled coefficients and SE for the non-renewable generation term (the MEF)
                         beta_nr_0_s = ms_results.params.get('x2[0]', np.nan)
@@ -1200,66 +1402,96 @@ class USMEFAnalysis:
         plt.tight_layout()
         plt.show()
     
-    def plot_mef_by_year(self, results_df, include_markov=True):
-        """Plot MEF estimates by year"""
-        fig, ax = plt.subplots(figsize=(14, 8))
+    def plot_mef_by_year(self, results_df, include_markov=True, hawkes=False):
+        """
+        Plot MEF estimates by year in two subplots:
+        1. MSM Estimates vs Average
+        2. Benchmark Estimates (OLS, ARIMA) vs Average
+        Fits linear regression trends with Confidence Intervals.
+        """
+        import seaborn as sns
+        import matplotlib.pyplot as plt
         
-        years = results_df['year']
         self.set_publication_style()
         
-        # OLS with CI
-        ax.errorbar(years, results_df['OLS_MEF'], 
-                   yerr=1.96*results_df['OLS_SE'],
-                   fmt='o-', label='OLS', markersize=10, capsize=5, capthick=2,
-                   linewidth=2.5, color='orange')
+        # Create 2 subplots side-by-side, sharing Y-axis for easy comparison
+        fig, (ax1, ax2) = plt.subplots(1, 2, figsize=(18, 8), sharey=True)
         
-        # Differences with CI
-        ax.errorbar(years , results_df['Diff_MEF'],
-                   yerr=1.96*results_df['Diff_SE'],
-                   fmt='s-', label='Differences', markersize=8, capsize=5, capthick=2,
-                   linewidth=2, color='gray', alpha=0.8)
+        years = results_df['year'].astype(int)
         
-        # ARIMA with CI
-        ax.errorbar(years , results_df['ARIMA_MEF'],
-                   yerr=1.96*results_df['ARIMA_SE'],
-                   fmt='^-', label='ARIMA', markersize=8, capsize=5, capthick=2,
-                   linewidth=2, color='red', alpha=0.8)
-        
-        # Markov Switching
-        if include_markov and 'MS_High_MEF' in results_df.columns:
-            ax.errorbar(years, results_df['MS_High_MEF'],
-                       yerr=1.96*results_df['MS_High_SE'],
-                       fmt='d-', label='MS-High', markersize=8, capsize=5, capthick=2,
-                       linewidth=2, color='blue', alpha=0.8)
+        # Helper function to plot Data Points + Error Bars + Regression Trend
+        def add_trend(ax, x, y, yerr, label, color, marker):
+            # 1. Plot the Regression Line with Shaded CI (using Seaborn)
+            # scatter=False because we plot specific points with error bars manually below
+            sns.regplot(x=x, y=y, ax=ax, scatter=False, color=color, 
+                        label=f'{label} (Trend)', ci=95, line_kws={'linestyle': '--', 'alpha': 0.8})
             
-            ax.errorbar(years, results_df['MS_Low_MEF'],
-                       yerr=1.96*results_df['MS_Low_SE'],
-                       fmt='v-', label='MS-Low', markersize=8, capsize=5, capthick=2,
-                       linewidth=2, color='purple', alpha=0.8)
+            # 2. Plot the specific Yearly Points with their Standard Errors
+            ax.errorbar(x, y, yerr=1.96*yerr, fmt=marker, label=f'{label} (Obs)', 
+                        markersize=8, capsize=5, capthick=2, linewidth=0, color=color, alpha=0.9)
+
+        # ==========================================
+        # LEFT PLOT: MSM vs Average
+        # ==========================================
+        ax1.set_title("Regime-Dependent Marginal Emissions", fontsize=18, fontweight='bold')
         
-        # Average emissions
-        ax.plot(years, results_df['Avg_Emissions'], 
-               'D-', label='Average Emissions', markersize=9, 
-               linewidth=2.5, color='pink')
-        
-        ax.set_xlabel('Year', fontsize=14, fontweight='bold')
-        ax.set_ylabel('MEF (kg CO2/kWh)', fontsize=14, fontweight='bold')
-        ax.set_title('US MEF Estimates by Year and Method', 
-                    fontsize=17, fontweight='bold')
-        ax.legend(fontsize=11, loc='best', framealpha=0.9)
-        ax.grid(True, alpha=0.3)
-        ax.set_xticks(years)
-        
+        # 1. Average Emissions (Baseline)
+        add_trend(ax1, years, results_df['Avg_Emissions'], 0, 'Average', 'pink', 'D')
+
+        # 2. Markov Switching Models
+        if include_markov and 'MS_High_MEF' in results_df.columns:
+            # High Regime
+            add_trend(ax1, years, results_df['MS_High_MEF'], results_df['MS_High_SE'], 
+                      'MS-HIGH', 'blue', 'd')
+            # Low Regime
+            add_trend(ax1, years, results_df['MS_Low_MEF'], results_df['MS_Low_SE'], 
+                      'MS-LOW', 'purple', 'v')
+
+        # ==========================================
+        # RIGHT PLOT: Benchmarks vs Average
+        # ==========================================
+        ax2.set_title("Benchmark Models Marginal Emissions", fontsize=18, fontweight='bold')
+
+        # 1. Average Emissions (for comparison)
+        add_trend(ax2, years, results_df['Avg_Emissions'], 0, 'Average', 'pink', 'D')
+
+        # 2. US-FE (OLS)
+        add_trend(ax2, years, results_df['OLS_MEF'], results_df['OLS_SE'], 
+                  'US-FE', 'orange', 'o')
+
+        # 3. ARIMA
+        add_trend(ax2, years, results_df['ARIMA_MEF'], results_df['ARIMA_SE'], 
+                  'ARIMA', 'red', '^')
+
+        # 4. Hawkes (Optional)
+        if hawkes and 'Diff_MEF' in results_df.columns:
+            add_trend(ax2, years, results_df['Diff_MEF'], results_df['Diff_SE'], 
+                      'HAWKES', 'gray', 's')
+
+        # ==========================================
+        # FORMATTING
+        # ==========================================
+        for ax in [ax1, ax2]:
+            ax.set_xlabel('Year', fontsize=20, fontweight='bold')
+            ax.set_xticks(years)
+            ax.tick_params(axis='x', labelsize=18)
+            ax.tick_params(axis='y', labelsize=18)
+            ax.grid(False)
+            # Simply legends to avoid duplication if trends/obs create too many entries
+            # We filter handles to only show the main identifiers if preferred, 
+            # or keep all to show what is trend vs observation.
+            ax.legend(fontsize=16, loc='best', framealpha=0.9)
+
+        ax1.set_ylabel('Marginal Emissions (lbs/MWh)', fontsize=16, fontweight='bold')
+        ax2.set_ylabel('', fontsize=16, fontweight='bold')
         plt.tight_layout()
         plt.show()
         
-        # Plot transition probabilities if available
+        # Plot transition probabilities if available (kept from your original code)
         if include_markov and 'P11' in results_df.columns:
             self._plot_transition_probs(results_df)
             
    
-    
-
 
 
 # Example usage
