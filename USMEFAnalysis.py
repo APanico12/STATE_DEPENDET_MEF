@@ -1472,7 +1472,7 @@ class USMEFAnalysis:
         # FORMATTING
         # ==========================================
         for ax in [ax1, ax2]:
-            ax.set_xlabel('Year', fontsize=20, fontweight='bold')
+            ax.set_xlabel('Year', fontsize=20)
             ax.set_xticks(years)
             ax.tick_params(axis='x', labelsize=18)
             ax.tick_params(axis='y', labelsize=18)
@@ -1482,8 +1482,8 @@ class USMEFAnalysis:
             # or keep all to show what is trend vs observation.
             ax.legend(fontsize=16, loc='best', framealpha=0.9)
 
-        ax1.set_ylabel('Marginal Emissions (lbs/MWh)', fontsize=16, fontweight='bold')
-        ax2.set_ylabel('', fontsize=16, fontweight='bold')
+        ax1.set_ylabel('Marginal Emissions (lbs/MWh)', fontsize=20)
+        ax2.set_ylabel('', fontsize=16)
         plt.tight_layout()
         plt.show()
         

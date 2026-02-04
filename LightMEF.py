@@ -558,26 +558,37 @@ class LightMEF:
         
         fig, (ax1, ax2) = plt.subplots(2, 1, figsize=(12, 8), sharex=True)
         
-        # Plot Data
+        # --- Top Panel: Data ---
         high = df[df['regime'] == 1]
         low = df[df['regime'] == 0]
         
         ax1.scatter(high['date_hour'], high['hourly_emissions_detrended'], color='#d62728', s=1, label='High MEF')
         ax1.scatter(low['date_hour'], low['hourly_emissions_detrended'], color='#1f77b4', s=1, label='Low MEF')
-        ax1.set_ylabel('Emissions (De-seasonalized)')
-        ax1.set_title('Time Series colored by Regime',loc='left', weight='bold')
-        ax1.legend(markerscale=5)
         
-        # Plot Probability
+        # Styling Top Panel
+        ax1.set_ylabel('Emissions (De-seasonalized)', size=16, weight='bold')
+        ax1.set_title('Time Series colored by Regime', loc='left', weight='bold', size=18)
+        ax1.legend(markerscale=5, fontsize=14)
+        ax1.tick_params(axis='y', labelsize=14) # Set y-tick size for top plot
+        
+        # --- Bottom Panel: Probability ---
         ax2.plot(df['date_hour'], df['prob_high_regime'], color='black', lw=0.5)
         ax2.fill_between(df['date_hour'], 0, df['prob_high_regime'], color='#d62728', alpha=0.3)
-        ax2.set_ylabel('Prob(High MEF)')
-        ax2.set_title('Smoothed Probability of High MEF Regime',loc='left', weight='bold')
+        
+        # Styling Bottom Panel
+        ax2.set_ylabel('Prob(High MEF)', size=16, weight='bold')
+        ax2.set_title('Smoothed Probability of High MEF Regime', loc='left', weight='bold', size=18)
+        
+        # 1. To change the FONT SIZE of the ticks (numbers):
+        ax2.tick_params(axis='both', which='major', labelsize=16) 
+        
+        # 2. To add the Label "Date" at the bottom
+        ax2.set_xlabel('Date', size=16, weight='bold')
         
         plt.tight_layout()
         if save_path: plt.savefig(save_path + "/regime_time_series.png")
         plt.show()
-
+    
     def plot_regime_polar_charts(self, save_path=None):
         """
         Create 'Wind Rose' style Polar Bar Charts for High Regime occurrences.
@@ -637,11 +648,11 @@ class LightMEF:
             ax.set_yticks(ticks)
             ax.set_yticklabels([f"{int(t*100)}%" for t in ticks], fontsize=7, color='gray')
             ax.set_xticks(theta)
-            ax.set_xticklabels(categories, fontweight='bold', fontsize=12)
+            ax.set_xticklabels(categories, fontweight='bold', fontsize=16)
             ax.grid(True, alpha=0.3)
             
             # Increase title size too if labels are bigger
-            ax.set_title(title, y=1.15, fontweight='bold', fontsize=13)
+            ax.set_title(title, y=1.15, fontweight='bold', fontsize=18)
             
 
         # --- 1. Seasonal Rose ---
