@@ -7,7 +7,7 @@ Advanced time-series analysis of US Marginal Emission Factors (MEF) using Markov
 This repository implements robust methodologies for analyzing and estimating Marginal Emission Factors (MEF) for the US electricity grid (Lower 48 states) using:
 
 - **Markov Switching Models (MSM)** - To identify and analyze different emissions regimes
-- **Dummy Variable Seasonality Extraction (DVSE)** - Following Kapoor et al. (2023) methodology
+- **Dummy Variable Seasonality Extraction (DVSE)** 
 - **Robust Change Point Detection (RobustCPD)** - Based on Riani et al. (2019) approach
 - **Time Series Analysis** - Including stationarity tests, linearity tests, and ARIMA modeling
 
@@ -33,8 +33,8 @@ pip install -e .
 
 ```
 RRMSW_MEF/
-├── main.ipynb                    # Primary analysis notebook
-├── mainlight.ipynb               # Lightweight analysis notebook
+├── main.ipynb                    # Primary analysis notebook for yearly MEFs
+├── mainlight.ipynb               # Lightweight analysis notebook for daily MEFs
 ├── Gas_Coal.ipynb                # Gas vs Coal comparative analysis
 ├── Gas_CPD.ipynb                 # Change point detection for gas data
 ├── DDD.ipynb                      # Dummy variable diagnostics
@@ -42,9 +42,6 @@ RRMSW_MEF/
 ├── LightMEF.py                   # Simplified MEF analysis class
 ├── RobustCPD.py                  # Robust change point detection
 ├── plot_style.py                 # Publication-quality plotting utilities
-├── df_fig7_data.csv              # Sample data for figure 7
-├── entsoe_data/
-│   └── DE-LU_2019-2025.csv      # European emissions reference data
 ├── requirements.txt              # Python dependencies
 ├── environment.yml               # Conda environment file
 └── setup.py                      # Package setup
@@ -194,14 +191,7 @@ Robust Change Point Detection following Riani et al. (2019).
    - Regime diagnostic plots
    - Publication-quality figures
 
-## Key Features
 
-✅ **Robust Methodology** - Based on peer-reviewed approaches  
-✅ **Comprehensive Testing** - Full suite of unit root and nonlinearity tests  
-✅ **Publication Quality** - Built-in styling for journal submission  
-✅ **Parallel Processing** - Joblib support for large datasets  
-✅ **Change Point Detection** - Automatic structural break identification  
-✅ **Markov Switching** - Multi-regime estimation and analysis  
 
 ## Dependencies
 
@@ -217,8 +207,6 @@ Robust Change Point Detection following Riani et al. (2019).
 See `requirements.txt` for exact versions.
 
 ## References
-
-- Kapoor, V., et al. (2023). *Dummy Variable Seasonality Extraction for MEF Analysis*
 - Riani, M., et al. (2019). *Robust Change Point Detection with Polynomial Trends*
 - Hamilton, J. D. (1989). *A New Approach to the Economic Analysis of Nonstationary Time Series*
 
