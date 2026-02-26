@@ -34,12 +34,12 @@ pip install -e .
 ```
 RRMSW_MEF/
 ├── main.ipynb                    # Primary analysis notebook for yearly MEFs
-├── mainlight.ipynb               # Lightweight analysis notebook for daily MEFs
+├── mainlight.ipynb               # Lightweight analysis notebook for hourly and State Dependet MEFs
 ├── Gas_Coal.ipynb                # Gas vs Coal comparative analysis
 ├── Gas_CPD.ipynb                 # Change point detection for gas data
-├── DDD.ipynb                      # Dummy variable diagnostics
+├── DDD.ipynb                     # Triple Differences quasi-expariment for gas coal generation (do not mentioned in the paper)
 ├── USMEFAnalysis.py              # Main analysis class
-├── LightMEF.py                   # Simplified MEF analysis class
+├── LightMEF.py                   # MEF analysis class for hourly and State Dependet MEFs
 ├── RobustCPD.py                  # Robust change point detection
 ├── plot_style.py                 # Publication-quality plotting utilities
 ├── requirements.txt              # Python dependencies
