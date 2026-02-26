@@ -18,12 +18,12 @@ def set_publication_style( use_latex=False):
         font_params = {
             'font.family': 'sans-serif',
             'font.sans-serif': ['Helvetica', 'Arial', 'DejaVu Sans'],
-            'font.size': 10,
-            'axes.titlesize': 12,
-            'axes.labelsize': 10,
-            'xtick.labelsize': 10,
-            'ytick.labelsize': 10,
-            'legend.fontsize': 10,
+            'font.size': 20,
+            'axes.titlesize': 20,
+            'axes.labelsize': 18,
+            'xtick.labelsize': 16,
+            'ytick.labelsize': 16,
+            'legend.fontsize': 16,
             'mathtext.fontset': 'stixsans',  # Sans-serif math look
         }
 

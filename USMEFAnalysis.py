@@ -62,12 +62,12 @@ class USMEFAnalysis:
         font_params = {
             'font.family': 'sans-serif',
             'font.sans-serif': ['Helvetica', 'Arial', 'DejaVu Sans'],
-            'font.size': 14,
-            'axes.titlesize': 18,
-            'axes.labelsize': 16,
-            'xtick.labelsize': 12,
-            'ytick.labelsize': 12,
-            'legend.fontsize': 14,
+            'font.size': 20,
+            'axes.titlesize': 20,
+            'axes.labelsize': 18,
+            'xtick.labelsize': 16,
+            'ytick.labelsize': 16,
+            'legend.fontsize': 16,
             'mathtext.fontset': 'stixsans',  # Sans-serif math look
         }
 
@@ -124,7 +124,7 @@ class USMEFAnalysis:
             'lines.markersize': 4,
             'axes.prop_cycle': plt.cycler('color', cb_palette),
         })
-        
+
     @staticmethod
     def get_figsize(width_mm, ratio=0.618):
         """
@@ -404,47 +404,22 @@ class USMEFAnalysis:
         
         df = self.data
         self.set_publication_style()
-        fig, axes = plt.subplots(2, 1, figsize=(10,8))
+        fig, axes = plt.subplots(2, 1, figsize=(18,12))
        
         # Emissions
         axes[0].plot(df['date_hour'], df['hourly_emissions_mlb'], 
                     linewidth=0.3, alpha=0.7, color='darkred')
-        axes[0].set_title('Hourly Emissions (2019-2025)', 
-                         fontsize=16, fontweight='bold')
-        axes[0].set_ylabel(r'Emissions (mlbs $CO_2$)', fontsize=13)
-        axes[0].grid(True, alpha=0.3)
+        axes[0].set_title('Hourly Emissions', 
+                         fontsize=18)
+        axes[0].set_ylabel(r'Emissions (Mlbs $CO_2$)')
+        
         
         # Generation
         axes[1].plot(df['date_hour'], df['hourly_generation_mkwh'],
                     linewidth=0.3, alpha=0.7, color='darkblue')
-        axes[1].set_title('Hourly Generation (2019-2025)', 
-                         fontsize=16, fontweight='bold')
-        axes[1].set_ylabel('Generation (MWh)', fontsize=13)
-        axes[1].set_xlabel('Date', fontsize=13)
-        axes[1].grid(True, alpha=0.3)
-        
-        plt.tight_layout()
-        plt.show()
-        
-        # Deseasonalized
-        fig, axes = plt.subplots(2, 1, figsize=self.get_figsize(89*2))
-       
-      
-        axes[0].plot(df['date_hour'], df['hourly_emissions_res'],
-                    linewidth=0.3, alpha=0.7, color='darkred')
-        axes[0].set_title('Hourly Emissions - Deseasoned & Detrended',
-                         fontsize=16, fontweight='bold')
-        axes[0].set_ylabel('Residual Emissions', fontsize=13)
-        axes[0].grid(True, alpha=0.3)
-        
-        axes[1].plot(df['date_hour'], df['hourly_generation_res'],
-                    linewidth=0.3, alpha=0.7, color='darkblue')
-        axes[1].set_title('Hourly Generation - Deseasoned & Detrended',
-                         fontsize=16, fontweight='bold')
-        axes[1].set_ylabel('Residual Generation', fontsize=13)
-        axes[1].set_xlabel('Date', fontsize=13)
-        axes[1].grid(True, alpha=0.3)
-        
+        axes[1].set_title('Hourly Generation ')
+        axes[1].set_ylabel('Generation (MWh)')
+        axes[1].set_xlabel('Date')
         plt.tight_layout()
         plt.show()
         
@@ -503,7 +478,7 @@ class USMEFAnalysis:
             ax1.set_ylabel("GWh")
             ax1.grid(True, alpha=0.3)
             plt.tight_layout()
-            if save_path: fig1.savefig(f"{save_path}/Generation_Res_{year}.pdf", bbox_inches='tight')
+            if save_path: fig1.savefig(f"{save_path}/Generation_Res_{year}.eps", bbox_inches='tight')
             plt.show()
 
             # Plot 2: ACF
@@ -512,7 +487,7 @@ class USMEFAnalysis:
             ax2.set_ylim(-1.05, 1.05)
             ax2.grid(True, alpha=0.3)
             plt.tight_layout()
-            if save_path: fig2.savefig(f"{save_path}/Generation_ACF_{year}.pdf", bbox_inches='tight')
+            if save_path: fig2.savefig(f"{save_path}/Generation_ACF_{year}.eps", bbox_inches='tight')
             plt.show()
 
             # Plot 3: PACF
@@ -521,7 +496,7 @@ class USMEFAnalysis:
             ax3.set_ylim(-1.05, 1.05)
             ax3.grid(True, alpha=0.3)
             plt.tight_layout()
-            if save_path: fig3.savefig(f"{save_path}/Generation_PACF_{year}.pdf", bbox_inches='tight')
+            if save_path: fig3.savefig(f"{save_path}/Generation_PACF_{year}.eps", bbox_inches='tight')
             plt.show()
 
             # ==========================================
@@ -535,7 +510,7 @@ class USMEFAnalysis:
             ax4.set_ylabel(r"Tons CO2 $10^3$")
             ax4.grid(True, alpha=0.3)
             plt.tight_layout()
-            if save_path: fig4.savefig(f"{save_path}/Emissions_Res_{year}.pdf", bbox_inches='tight')
+            if save_path: fig4.savefig(f"{save_path}/Emissions_Res_{year}.eps", bbox_inches='tight')
             plt.show()
 
             # Plot 2: ACF
@@ -544,7 +519,7 @@ class USMEFAnalysis:
             ax5.set_ylim(-1.05, 1.05)
             ax5.grid(True, alpha=0.3)
             plt.tight_layout()
-            if save_path: fig5.savefig(f"{save_path}/Emissions_ACF_{year}.pdf", bbox_inches='tight')
+            if save_path: fig5.savefig(f"{save_path}/Emissions_ACF_{year}.eps", bbox_inches='tight')
             plt.show()
 
             # Plot 3: PACF
@@ -553,7 +528,7 @@ class USMEFAnalysis:
             ax6.set_ylim(-1.05, 1.05)
             ax6.grid(True, alpha=0.3)
             plt.tight_layout()
-            if save_path: fig6.savefig(f"{save_path}/Emissions_PACF_{year}.pdf", bbox_inches='tight')
+            if save_path: fig6.savefig(f"{save_path}/Emissions_PACF_{year}.eps", bbox_inches='tight')
             plt.show()
     
     def plot_annual_diagnostics_dynamic_linear(self, lags=100, save_path=None):
@@ -930,6 +905,7 @@ class USMEFAnalysis:
             name='y_standardized'
         )
         
+        
         # Scale Exogenous (X)
         scaler_x = StandardScaler()
         X_scaled = pd.DataFrame(
@@ -941,11 +917,28 @@ class USMEFAnalysis:
         results_list = []
 
         def get_model_stats(model_name, model_result):
+            import numpy as np
+            
+            # 1. Extract base metrics
+            aic = model_result.aic
+            bic = model_result.bic
+            llf = model_result.llf
+            
+            # 2. Handle HQIC (Manual calculation for OLS if missing)
+            if hasattr(model_result, 'hqic'):
+                hqic = model_result.hqic
+            else:
+                # Manual Calculation: -2*LLF + 2*k*ln(ln(n))
+                n = model_result.nobs
+                k = len(model_result.params)
+                hqic = -2 * llf + 2 * k * np.log(np.log(n))
+            
             return {
                 "Model": model_name,
-                "AIC": round(model_result.aic, 2),
-                "BIC": round(model_result.bic, 2),
-                "Log_Likelihood": round(model_result.llf, 2)
+                "AIC": round(aic, 2),
+                "BIC": round(bic, 2),
+                "HQIC": round(hqic, 2),
+                "Log_Likelihood": round(llf, 2)
             }
 
         # =========================================================
@@ -1057,7 +1050,8 @@ class USMEFAnalysis:
             df = self.data.copy()
             groups = sorted(df[group_col].unique())
             results = []
-
+            #create dataset to store Residuals
+            resid_dict = {'year': [], 'Residuals': []}
             for group in groups:
                 print(f"\n🔹 Processing {group_col} = {group}...")
                 subset = df[df[group_col] == group].copy()
@@ -1136,6 +1130,7 @@ class USMEFAnalysis:
                 # ------------------------
                 # 4. ARIMA MEF
                 # ------------------------
+               
                 try:
                     import pmdarima as pm
                     # Step A: Auto-ARIMA on emissions only (finding d and q)
@@ -1179,6 +1174,8 @@ class USMEFAnalysis:
                 # ------------------------
                 # 5. Markov Switching MEF (SCALED & ROBUST)
                 # ------------------------
+                
+                
                 ms_high_mef = ms_high_se = ms_low_mef = ms_low_se = np.nan
                 p11 = p00 = dur_high = dur_low = np.nan
 
@@ -1220,7 +1217,14 @@ class USMEFAnalysis:
 
                         # E. Fit with better initialization
                         ms_results = ms_model.fit()
-                        # F. Extract and UNSCALE coefficients
+                        
+                        #create check for the residuals to assests if the  model MSM-ARX(1) is a good fit for the data, if not we are sad but we will use it anyway
+                        resids = ms_results.model.endog[1:] - ms_results.fittedvalues
+                        unscaled_resid = resids * float(scaler_y.scale_[0])
+                        #here extend helps to create a long format dataset for residuals with corresponding years for plotting
+                        resid_dict['year'].extend([group] * len(unscaled_resid))
+                        resid_dict['Residuals'].extend(unscaled_resid)
+
                         # Get scaled coefficients and SE for the non-renewable generation term (the MEF)
                         beta_nr_0_s = ms_results.params.get('x2[0]', np.nan)
                         beta_nr_1_s = ms_results.params.get('x2[1]', np.nan)
@@ -1281,8 +1285,64 @@ class USMEFAnalysis:
                     'Dur_High': dur_high, 'Dur_Low': dur_low,
                     'Avg_Emissions': avg_em
                 })
-
+            #create a dataframe for residuals to be used in plotting diagnostics
+            self.msm_residuals = pd.DataFrame(resid_dict)
             return pd.DataFrame(results)
+        
+    def plot_annual_diagnostics_MSM(self, lags=100, save_path='images_msm'):
+        """
+        Dynamic version: Recalculates residuals each year.
+        Generates 3 separate SQUARE plots per variable: Residuals, ACF, and PACF.
+        """
+        if self.msm_residuals is None:
+            raise ValueError("No data loaded. Run load_and_clean_data() first.")
+
+        self.set_publication_style()
+
+        df = self.msm_residuals.copy()
+        years = sorted(df['year'].unique())
+        print(f"🧭 Found {len(years)} years: {years}")
+
+        # Define Square Size (e.g., 6x6 inches)
+        sq_size = (6, 6)
+
+        for year in years:
+            print(f"\n📅 Processing {year}...")
+            df_year = df[df['year'] == year].copy()
+
+            df_plot = df_year.dropna(subset=['Residuals'])
+            
+            # ==========================================
+            # VARIABLE 2: EMISSIONS
+            # ==========================================
+
+            # Plot 1: Residuals Time Series
+            fig4, ax4 = plt.subplots(figsize=sq_size)
+            ax4.plot( df_plot['Residuals']/1000, color='black', linewidth=0.8)
+            ax4.set_title(f"Residuals MSM ({year})")
+            ax4.set_ylabel(r"Tons CO2 $10^3$")
+            ax4.grid(True, alpha=0.3)
+            plt.tight_layout()
+            if save_path: fig4.savefig(f"{save_path}/MSM_Res_{year}.pdf", bbox_inches='tight')
+            plt.show()
+
+            # Plot 2: ACF
+            fig5, ax5 = plt.subplots(figsize=sq_size)
+            plot_acf(df_plot['Residuals'].dropna(), lags=lags, ax=ax5, color="#1f77b4", zero=False, title=f"ACF MSM ({year})")
+            ax5.set_ylim(-1.05, 1.05)
+            ax5.grid(True, alpha=0.3)
+            plt.tight_layout()
+            if save_path: fig5.savefig(f"{save_path}/MSM_ACF_{year}.pdf", bbox_inches='tight')
+            plt.show()
+
+            # Plot 3: PACF
+            fig6, ax6 = plt.subplots(figsize=sq_size)
+            plot_pacf(df_plot['Residuals'].dropna(), lags=lags, ax=ax6, color="#ff7f0e", zero=False, method="ywm", title=f"PACF MSM ({year})")
+            ax6.set_ylim(-1.05, 1.05)
+            ax6.grid(True, alpha=0.3)
+            plt.tight_layout()
+            if save_path: fig6.savefig(f"{save_path}/MSM_PACF_{year}.pdf", bbox_inches='tight')
+            plt.show()    
         
     def plot_smoothed_probabilities(self, lags=1):
         """
@@ -1402,7 +1462,7 @@ class USMEFAnalysis:
         plt.tight_layout()
         plt.show()
     
-    def plot_mef_by_year(self, results_df, include_markov=True, hawkes=False):
+    def plot_mef_by_year(self, results_df, include_markov=True, hawkes=True):
         """
         Plot MEF estimates by year in two subplots:
         1. MSM Estimates vs Average
@@ -1433,7 +1493,7 @@ class USMEFAnalysis:
         # ==========================================
         # LEFT PLOT: MSM vs Average
         # ==========================================
-        ax1.set_title("Regime-Dependent Marginal Emissions", fontsize=18, fontweight='bold')
+        ax1.set_title("Regime-Dependent Marginal Emissions", fontsize=20)
         
         # 1. Average Emissions (Baseline)
         add_trend(ax1, years, results_df['Avg_Emissions'], 0, 'Average', 'pink', 'D')
@@ -1450,7 +1510,7 @@ class USMEFAnalysis:
         # ==========================================
         # RIGHT PLOT: Benchmarks vs Average
         # ==========================================
-        ax2.set_title("Benchmark Models Marginal Emissions", fontsize=18, fontweight='bold')
+        ax2.set_title("Benchmark Models Marginal Emissions", fontsize=20)
 
         # 1. Average Emissions (for comparison)
         add_trend(ax2, years, results_df['Avg_Emissions'], 0, 'Average', 'pink', 'D')
@@ -1464,8 +1524,8 @@ class USMEFAnalysis:
                   'ARIMA', 'red', '^')
 
         # 4. Hawkes (Optional)
-        if hawkes and 'Diff_MEF' in results_df.columns:
-            add_trend(ax2, years, results_df['Diff_MEF'], results_df['Diff_SE'], 
+        if hawkes and 'Diff_MEF_2' in results_df.columns:
+            add_trend(ax2, years, results_df['Diff_MEF_2'], results_df['Diff_SE_2'], 
                       'HAWKES', 'gray', 's')
 
         # ==========================================
@@ -1482,7 +1542,7 @@ class USMEFAnalysis:
             # or keep all to show what is trend vs observation.
             ax.legend(fontsize=16, loc='best', framealpha=0.9)
 
-        ax1.set_ylabel('Marginal Emissions (lbs/MWh)', fontsize=20)
+        ax1.set_ylabel('Marginal Emissions (lbs/kWh)', fontsize=20)
         ax2.set_ylabel('', fontsize=16)
         plt.tight_layout()
         plt.show()
