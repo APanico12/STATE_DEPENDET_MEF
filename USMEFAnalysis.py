@@ -443,6 +443,7 @@ class USMEFAnalysis:
         Dynamic version: Recalculates residuals each year.
         Generates 3 separate SQUARE plots per variable: Residuals, ACF, and PACF.
         """
+        import matplotlib.dates as mdates
         if self.data is None:
             raise ValueError("No data loaded. Run load_and_clean_data() first.")
 
@@ -474,6 +475,8 @@ class USMEFAnalysis:
             # Plot 1: Residuals Time Series
             fig1, ax1 = plt.subplots(figsize=sq_size)
             ax1.plot(df_year['date_hourx'], df_year['hourly_generation_res']/1000, color='black', linewidth=0.8)
+            ax1.xaxis.set_major_locator(mdates.MonthLocator(interval=3)) # Ticks every 3 months
+            ax1.xaxis.set_major_formatter(mdates.DateFormatter('%b'))    # Show month name (Jan, Apr, etc.)
             ax1.set_title(f"Generation Residuals ({year})")
             ax1.set_ylabel("GWh")
             ax1.grid(True, alpha=0.3)
@@ -506,6 +509,9 @@ class USMEFAnalysis:
             # Plot 1: Residuals Time Series
             fig4, ax4 = plt.subplots(figsize=sq_size)
             ax4.plot(df_year['date_hourx'], df_year['hourly_emissions_res']/1000, color='black', linewidth=0.8)
+            # 2. For Emissions Residuals (fig4/ax4)
+            ax4.xaxis.set_major_locator(mdates.MonthLocator(interval=3))
+            ax4.xaxis.set_major_formatter(mdates.DateFormatter('%b'))
             ax4.set_title(f"Emissions Residuals ({year})")
             ax4.set_ylabel(r"Tons CO2 $10^3$")
             ax4.grid(True, alpha=0.3)
@@ -530,80 +536,7 @@ class USMEFAnalysis:
             plt.tight_layout()
             if save_path: fig6.savefig(f"{save_path}/Emissions_PACF_{year}.eps", bbox_inches='tight')
             plt.show()
-    
-    def plot_annual_diagnostics_dynamic_linear(self, lags=100, save_path=None):
-        """
-        Dynamic version: Recalculates residuals each year using regression
-        similar to the R script.
-        """
-        if self.data is None:
-            raise ValueError("No data loaded. Run load_and_clean_data() first.")
-
-        self.set_publication_style()
-
-        df = self.data.copy()
-        df['date_hourx'] = pd.to_datetime(df['date_hour'], utc=True, errors='coerce')
-        years = sorted(df['year'].unique())
-        print(f"🧭 Found {len(years)} years: {years}")
-
-        for year in years:
-            print(f"\n📅 Processing {year}...")
-            df_year = df[df['year'] == year].copy()
-
-            # Recalculate hourly generation residuals
-            model_gen = ols("hourly_generation ~ factorinterval + factormonth + factordow + trend", data=df_year).fit()
-            df_year['hourly_generation_res'] = model_gen.resid + model_gen.params[0]
-
-            # Recalculate hourly emissions residuals
-            model_em = ols("hourly_emissions ~ factorinterval + factormonth + factordow + trend", data=df_year).fit()
-            df_year['hourly_emissions_res'] = model_em.resid + model_em.params[0]
-
-            # --- Plot generation residuals ---
-            self.elegant_plot(
-                df_year['date_hourx'], df_year['hourly_generation_res'],
-                f"Hourly Load – Deseasoned & Detrended ({year})",
-                "Hourly load (MWh)", save_path=save_path
-            )
-
-            # --- ACF/PACF for generation ---
-            fig, ax = plt.subplots(2, 1, figsize=self.get_figsize(89 * 2))
-            plot_acf(df_year['hourly_generation_res'].dropna(), lags=lags, ax=ax[0], color="#1f77b4", zero=False)
-            plot_pacf(df_year['hourly_generation_res'].dropna(), lags=lags, ax=ax[1], color="#ff7f0e", zero=False, method="ywm")
-
-            for i, title in enumerate(["ACF – Hourly Load", "PACF – Hourly Load"]):
-                ax[i].set_title(f"{title} ({year})", loc='left', pad=10, weight='bold')
-                ax[i].set_ylim(-1.05, 1.05)
-                ax[i].spines[['top', 'right']].set_visible(False)
-                ax[i].grid(True, alpha=0.3)
-
-            fig.tight_layout()
-            if save_path:
-                fig.savefig(f"{save_path}/ACF_PACF_Load_{year}.png", dpi=300, bbox_inches='tight')
-            plt.show()
-
-            # --- Plot emissions residuals ---
-            self.elegant_plot(
-                df_year['date_hourx'], df_year['hourly_emissions_res'],
-                f"Hourly Emissions – Deseasoned & Detrended ({year})",
-                "Hourly emissions (metric tons CO₂)", save_path=save_path
-            )
-
-            # --- ACF/PACF for emissions ---
-            fig, ax = plt.subplots(2, 1, figsize=self.get_figsize(89 * 2))
-            plot_acf(df_year['hourly_emissions_res'].dropna(), lags=lags, ax=ax[0], color="#1f77b4", zero=False)
-            plot_pacf(df_year['hourly_emissions_res'].dropna(), lags=lags, ax=ax[1], color="#ff7f0e", zero=False, method="ywm")
-
-            for i, title in enumerate(["ACF – Hourly Emissions", "PACF – Hourly Emissions"]):
-                ax[i].set_title(f"{title} ({year})", loc='left', pad=10, weight='bold')
-                ax[i].set_ylim(-1.05, 1.05)
-                ax[i].spines[['top', 'right']].set_visible(False)
-                ax[i].grid(True, alpha=0.3)
-
-            fig.tight_layout()
-            if save_path:
-                fig.savefig(f"{save_path}/ACF_PACF_Emissions_{year}.png", dpi=300, bbox_inches='tight')
-            plt.show()    
-        
+     
     def plot_seasonal_diagnostics_dynamic(self, lags=100, save_path=None):
         """
         Create publication-quality seasonal diagnostic plots.
@@ -1272,7 +1205,7 @@ class USMEFAnalysis:
                 avg_em = subset['hourly_emissions_mlb'].sum() / (
                     subset['hourly_generation_renewables_mkwh'].sum() + subset['hourly_generation_nonrenewables_mkwh'].sum()
                 )
-
+                
                 results.append({
                     group_col: group,
                     'OLS_MEF': ols_mef, 'OLS_SE': ols_se,
@@ -1287,44 +1220,43 @@ class USMEFAnalysis:
                 })
             #create a dataframe for residuals to be used in plotting diagnostics
             self.msm_residuals = pd.DataFrame(resid_dict)
+            self.data['MSM_residuals'] = self.msm_residuals['Residuals']
             return pd.DataFrame(results)
         
     def plot_annual_diagnostics_MSM(self, lags=100, save_path='images_msm'):
+        
         """
         Dynamic version: Recalculates residuals each year.
         Generates 3 separate SQUARE plots per variable: Residuals, ACF, and PACF.
         """
+        import matplotlib.dates as mdates
         if self.msm_residuals is None:
             raise ValueError("No data loaded. Run load_and_clean_data() first.")
 
         self.set_publication_style()
 
+
         df = self.msm_residuals.copy()
         years = sorted(df['year'].unique())
         print(f"🧭 Found {len(years)} years: {years}")
-
-        # Define Square Size (e.g., 6x6 inches)
+        
         sq_size = (6, 6)
-
+        
         for year in years:
             print(f"\n📅 Processing {year}...")
             df_year = df[df['year'] == year].copy()
-
             df_plot = df_year.dropna(subset=['Residuals'])
-            
-            # ==========================================
-            # VARIABLE 2: EMISSIONS
-            # ==========================================
-
-            # Plot 1: Residuals Time Series
+             # Plot 1: Residuals Time Series
             fig4, ax4 = plt.subplots(figsize=sq_size)
-            ax4.plot( df_plot['Residuals']/1000, color='black', linewidth=0.8)
+            ax4.plot( df_year['Residuals']/1000, color='black', linewidth=0.8)
+            # 2. For Emissions Residuals (fig4/ax4)
             ax4.set_title(f"Residuals MSM ({year})")
             ax4.set_ylabel(r"Tons CO2 $10^3$")
             ax4.grid(True, alpha=0.3)
             plt.tight_layout()
-            if save_path: fig4.savefig(f"{save_path}/MSM_Res_{year}.pdf", bbox_inches='tight')
+            if save_path: fig4.savefig(f"{save_path}/MSM_Res_{year}.eps", bbox_inches='tight')
             plt.show()
+        
 
             # Plot 2: ACF
             fig5, ax5 = plt.subplots(figsize=sq_size)
@@ -1332,7 +1264,7 @@ class USMEFAnalysis:
             ax5.set_ylim(-1.05, 1.05)
             ax5.grid(True, alpha=0.3)
             plt.tight_layout()
-            if save_path: fig5.savefig(f"{save_path}/MSM_ACF_{year}.pdf", bbox_inches='tight')
+            if save_path: fig5.savefig(f"{save_path}/MSM_ACF_{year}.eps", bbox_inches='tight')
             plt.show()
 
             # Plot 3: PACF
@@ -1341,7 +1273,7 @@ class USMEFAnalysis:
             ax6.set_ylim(-1.05, 1.05)
             ax6.grid(True, alpha=0.3)
             plt.tight_layout()
-            if save_path: fig6.savefig(f"{save_path}/MSM_PACF_{year}.pdf", bbox_inches='tight')
+            if save_path: fig6.savefig(f"{save_path}/MSM_PACF_{year}.eps", bbox_inches='tight')
             plt.show()    
         
     def plot_smoothed_probabilities(self, lags=1):
