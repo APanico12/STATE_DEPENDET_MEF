@@ -481,7 +481,7 @@ class USMEFAnalysis:
             ax1.set_ylabel("GWh")
             ax1.grid(True, alpha=0.3)
             plt.tight_layout()
-            if save_path: fig1.savefig(f"{save_path}/Generation_Res_{year}.eps", bbox_inches='tight')
+            if save_path: fig1.savefig(f"{save_path}/Generation_Res_{year}.pdf", bbox_inches='tight')
             plt.show()
 
             # Plot 2: ACF
@@ -490,7 +490,7 @@ class USMEFAnalysis:
             ax2.set_ylim(-1.05, 1.05)
             ax2.grid(True, alpha=0.3)
             plt.tight_layout()
-            if save_path: fig2.savefig(f"{save_path}/Generation_ACF_{year}.eps", bbox_inches='tight')
+            if save_path: fig2.savefig(f"{save_path}/Generation_ACF_{year}.pdf", bbox_inches='tight')
             plt.show()
 
             # Plot 3: PACF
@@ -499,7 +499,7 @@ class USMEFAnalysis:
             ax3.set_ylim(-1.05, 1.05)
             ax3.grid(True, alpha=0.3)
             plt.tight_layout()
-            if save_path: fig3.savefig(f"{save_path}/Generation_PACF_{year}.eps", bbox_inches='tight')
+            if save_path: fig3.savefig(f"{save_path}/Generation_PACF_{year}.pdf", bbox_inches='tight')
             plt.show()
 
             # ==========================================
@@ -516,7 +516,7 @@ class USMEFAnalysis:
             ax4.set_ylabel(r"Tons CO2 $10^3$")
             ax4.grid(True, alpha=0.3)
             plt.tight_layout()
-            if save_path: fig4.savefig(f"{save_path}/Emissions_Res_{year}.eps", bbox_inches='tight')
+            if save_path: fig4.savefig(f"{save_path}/Emissions_Res_{year}.pdf", bbox_inches='tight')
             plt.show()
 
             # Plot 2: ACF
@@ -525,7 +525,7 @@ class USMEFAnalysis:
             ax5.set_ylim(-1.05, 1.05)
             ax5.grid(True, alpha=0.3)
             plt.tight_layout()
-            if save_path: fig5.savefig(f"{save_path}/Emissions_ACF_{year}.eps", bbox_inches='tight')
+            if save_path: fig5.savefig(f"{save_path}/Emissions_ACF_{year}.pdf", bbox_inches='tight')
             plt.show()
 
             # Plot 3: PACF
@@ -534,7 +534,7 @@ class USMEFAnalysis:
             ax6.set_ylim(-1.05, 1.05)
             ax6.grid(True, alpha=0.3)
             plt.tight_layout()
-            if save_path: fig6.savefig(f"{save_path}/Emissions_PACF_{year}.eps", bbox_inches='tight')
+            if save_path: fig6.savefig(f"{save_path}/Emissions_PACF_{year}.pdf", bbox_inches='tight')
             plt.show()
      
     def plot_seasonal_diagnostics_dynamic(self, lags=100, save_path=None):
@@ -984,7 +984,7 @@ class USMEFAnalysis:
             groups = sorted(df[group_col].unique())
             results = []
             #create dataset to store Residuals
-            resid_dict = {'year': [], 'Residuals': []}
+            resid_dict = {'year': [], 'Residuals': [], 'Date': []}
             for group in groups:
                 print(f"\n🔹 Processing {group_col} = {group}...")
                 subset = df[df[group_col] == group].copy()
@@ -1157,7 +1157,8 @@ class USMEFAnalysis:
                         #here extend helps to create a long format dataset for residuals with corresponding years for plotting
                         resid_dict['year'].extend([group] * len(unscaled_resid))
                         resid_dict['Residuals'].extend(unscaled_resid)
-
+                        resid_dict['Date'].extend(subset['date_hour'].iloc[2:].tolist())
+                        
                         # Get scaled coefficients and SE for the non-renewable generation term (the MEF)
                         beta_nr_0_s = ms_results.params.get('x2[0]', np.nan)
                         beta_nr_1_s = ms_results.params.get('x2[1]', np.nan)
@@ -1237,6 +1238,7 @@ class USMEFAnalysis:
 
 
         df = self.msm_residuals.copy()
+        df['date_hourx'] = pd.to_datetime(df['Date'], utc=True, errors='coerce')
         years = sorted(df['year'].unique())
         print(f"🧭 Found {len(years)} years: {years}")
         
@@ -1246,17 +1248,20 @@ class USMEFAnalysis:
             print(f"\n📅 Processing {year}...")
             df_year = df[df['year'] == year].copy()
             df_plot = df_year.dropna(subset=['Residuals'])
-             # Plot 1: Residuals Time Series
+            
+            # Plot 1: Residuals Time Series
             fig4, ax4 = plt.subplots(figsize=sq_size)
-            ax4.plot( df_year['Residuals']/1000, color='black', linewidth=0.8)
+            ax4.plot(df_year['date_hourx'], df_year['Residuals']/1000, color='black', linewidth=0.8)
             # 2. For Emissions Residuals (fig4/ax4)
-            ax4.set_title(f"Residuals MSM ({year})")
+            ax4.xaxis.set_major_locator(mdates.MonthLocator(interval=3))
+            ax4.xaxis.set_major_formatter(mdates.DateFormatter('%b'))
+            ax4.set_title(f"Emissions Residuals ({year})")
             ax4.set_ylabel(r"Tons CO2 $10^3$")
             ax4.grid(True, alpha=0.3)
             plt.tight_layout()
-            if save_path: fig4.savefig(f"{save_path}/MSM_Res_{year}.eps", bbox_inches='tight')
+            if save_path: fig4.savefig(f"{save_path}/MSM_Res_{year}.pdf", bbox_inches='tight')
             plt.show()
-        
+            
 
             # Plot 2: ACF
             fig5, ax5 = plt.subplots(figsize=sq_size)
@@ -1264,7 +1269,7 @@ class USMEFAnalysis:
             ax5.set_ylim(-1.05, 1.05)
             ax5.grid(True, alpha=0.3)
             plt.tight_layout()
-            if save_path: fig5.savefig(f"{save_path}/MSM_ACF_{year}.eps", bbox_inches='tight')
+            if save_path: fig5.savefig(f"{save_path}/MSM_ACF_{year}.pdf", bbox_inches='tight')
             plt.show()
 
             # Plot 3: PACF
@@ -1273,7 +1278,7 @@ class USMEFAnalysis:
             ax6.set_ylim(-1.05, 1.05)
             ax6.grid(True, alpha=0.3)
             plt.tight_layout()
-            if save_path: fig6.savefig(f"{save_path}/MSM_PACF_{year}.eps", bbox_inches='tight')
+            if save_path: fig6.savefig(f"{save_path}/MSM_PACF_{year}.pdf", bbox_inches='tight')
             plt.show()    
         
     def plot_smoothed_probabilities(self, lags=1):
