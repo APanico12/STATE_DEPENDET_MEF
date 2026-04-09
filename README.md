@@ -243,20 +243,9 @@ See LICENSE file for details.
 
 ## Author
 
-A. Panico
 
 ## Citation
 
-If you use this code in your research, please cite as:
-
-```bibtex
-@software{panico2024rrmsw,
-  title={RRMSW_MEF: Robust Regime Markov Switching for Marginal Emission Factor Analysis},
-  author={Panico, A.},
-  year={2024},
-  url={https://github.com/APanico12/RRMSW_MEF}
-}
-```
 
 ## Support
 
